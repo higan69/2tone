@@ -1,0 +1,1633 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light dark" />
+<link rel="icon" href="data:," />
+<title>2値・ハーフトーン変換</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#e9e7e2; --panel:#f7f6f3; --panel2:#fff; --ink:#17171a; --ink2:#55534e;
+    --line:#17171a; --line-soft:#c9c6bf; --accent:#cf2b23; --accent-ink:#fff;
+    --checker:#d8d5cf; --field:#fff; --chip:#eceae5; --warn:#a3540a; --warn-bg:#fdf0dd;
+    --shadow:0 1px 0 rgba(0,0,0,.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#131315; --panel:#1d1d20; --panel2:#242428; --ink:#f0efe9; --ink2:#a9a69e;
+      --line:#f0efe9; --line-soft:#3a3a3f; --field:#17171a; --chip:#2b2b30;
+      --checker:#2e2e33; --warn:#f0b26b; --warn-bg:#3a2a16; --shadow:none;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN",system-ui,sans-serif;
+    background:var(--bg); color:var(--ink); font-size:15px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+  button,[role="button"],select,input:not([type="range"]){min-height:40px}
+  button{font:inherit;cursor:pointer}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .app{display:grid;grid-template-columns:360px minmax(0,1fr);min-height:100vh}
+
+  /* ---------- control panel ---------- */
+  .panel{background:var(--panel);border-right:2px solid var(--line);overflow-y:auto;max-height:100vh;position:sticky;top:0}
+  .panel-head{padding:16px 18px 12px;border-bottom:1px solid var(--line-soft)}
+  .panel-head h1{font-size:19px;font-weight:900;margin:0;letter-spacing:.02em}
+  .panel-head p{margin:4px 0 0;font-size:12.5px;color:var(--ink2)}
+  section.blk{padding:14px 18px 16px;border-bottom:1px solid var(--line-soft)}
+  section.blk h2{font-size:13px;font-weight:900;margin:0 0 10px;display:flex;align-items:baseline;gap:8px;letter-spacing:.04em}
+  section.blk h2 .no{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--accent);font-weight:600}
+  section.blk h2 .sub{margin-left:auto;font-size:11px;color:var(--ink2);font-weight:400}
+  .hint{font-size:12px;color:var(--ink2);margin:6px 0 0}
+  .hint b{color:var(--ink)}
+
+  .drop{
+    border:2px dashed var(--line-soft);background:var(--panel2);padding:14px;text-align:center;
+    transition:border-color .15s, background .15s;
+  }
+  .drop.over{border-color:var(--accent);background:var(--warn-bg)}
+  .drop .big{font-weight:700;font-size:14px}
+  .drop .small{font-size:12px;color:var(--ink2)}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .row>*{flex:1}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    background:var(--panel2);color:var(--ink);border:1.5px solid var(--line);
+    padding:8px 12px;font-weight:700;font-size:13.5px;border-radius:3px;box-shadow:var(--shadow);
+  }
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn.small{min-height:36px;padding:5px 9px;font-size:12.5px}
+  .btn[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+  .btn.primary[aria-pressed="true"]{background:var(--accent);color:#fff}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  input[type="file"]{display:none}
+
+  label.f{display:block;font-size:12.5px;font-weight:700;margin:10px 0 4px}
+  label.f:first-child{margin-top:0}
+  select,input[type="number"],input[type="text"]{
+    width:100%;background:var(--field);color:var(--ink);border:1.5px solid var(--line-soft);
+    border-radius:3px;padding:7px 9px;font:inherit;font-size:14px;
+  }
+  select:focus,input:focus{border-color:var(--line)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+
+  .slider-row{display:grid;grid-template-columns:86px 1fr 44px;align-items:center;gap:8px;margin:7px 0}
+  .slider-row label{font-size:12.5px;font-weight:500}
+  .slider-row output{font-family:"IBM Plex Mono",monospace;font-size:12px;text-align:right}
+  input[type="range"]{width:100%;height:36px;accent-color:var(--accent);cursor:pointer;margin:0}
+
+  .seg{display:flex;border:1.5px solid var(--line);border-radius:3px;overflow:hidden}
+  .seg button{flex:1;background:var(--panel2);color:var(--ink);border:0;border-right:1px solid var(--line-soft);font-size:13px;font-weight:700;padding:8px 4px;min-height:40px}
+  .seg button:last-child{border-right:0}
+  .seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+  .outbox{background:var(--ink);color:var(--bg);padding:10px 12px;border-radius:3px;margin-top:10px}
+  .outbox .px{font-family:"IBM Plex Mono",monospace;font-size:17px;font-weight:600;letter-spacing:.02em}
+  .outbox .mm{font-size:12px;opacity:.75}
+  .warnbox{background:var(--warn-bg);color:var(--warn);border:1px solid var(--warn);border-radius:3px;padding:8px 10px;font-size:12.5px;margin-top:8px;display:none}
+  .warnbox.show{display:block}
+
+  #curveCanvas{width:100%;height:auto;display:block;background:var(--field);border:1.5px solid var(--line-soft);border-radius:3px;touch-action:none;cursor:crosshair}
+  .swatch{display:inline-block;width:22px;height:22px;border:1.5px solid var(--line);border-radius:3px;vertical-align:middle;background:#fff}
+  .toggle-row{display:flex;align-items:center;gap:10px;margin:8px 0}
+  .toggle-row .grow{flex:1;font-size:13.5px;font-weight:700}
+  .switch{position:relative;width:52px;height:32px;flex:none;display:inline-block}
+  .switch input{-webkit-appearance:none;appearance:none;display:block;width:52px;height:32px;min-height:32px;margin:0;background:var(--chip);border:1.5px solid var(--line);border-radius:99px;cursor:pointer;position:relative;transition:background .15s;padding:0}
+  .switch input::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:var(--panel2);border:1.5px solid var(--line);transition:left .15s}
+  .switch input:checked{background:var(--accent);border-color:var(--accent)}
+  .switch input:checked::after{left:23px}
+  .switch .tr{display:none}
+  .cond{opacity:.38;pointer-events:none}
+  .cond.on{opacity:1;pointer-events:auto}
+
+  /* ---------- stage ---------- */
+  .stage{display:flex;flex-direction:column;min-width:0}
+  .toolbar{
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;
+    background:var(--panel);border-bottom:2px solid var(--line);position:sticky;top:0;z-index:5;
+  }
+  .toolbar .sp{flex:1}
+  .toolbar .stat{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink2)}
+  .canvas-wrap{
+    flex:1;overflow:auto;display:grid;place-items:start center;padding:22px;
+    background:
+      repeating-conic-gradient(var(--checker) 0% 25%, transparent 0% 50%) 0 0/22px 22px,
+      var(--bg);
+  }
+  .canvas-holder{background:repeating-conic-gradient(#ffffff 0% 25%, #c9c6bf 0% 50%) 0 0/18px 18px;box-shadow:0 4px 28px rgba(0,0,0,.28);line-height:0;position:relative}
+  #viewCanvas{image-rendering:pixelated;max-width:none;display:block}
+  #viewCanvas.brush{cursor:crosshair}
+  .empty{
+    max-width:520px;text-align:center;padding:48px 26px;background:var(--panel);
+    border:2px dashed var(--line-soft);color:var(--ink2);line-height:0;
+  }
+  .empty .t{font-size:16px;font-weight:900;color:var(--ink);line-height:1.5}
+  .empty p{line-height:1.7;font-size:13.5px}
+  .footbar{
+    display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;padding:10px 14px;
+    background:var(--panel);border-top:1px solid var(--line-soft);
+  }
+  #histCanvas{width:220px;height:56px;background:var(--field);border:1px solid var(--line-soft);border-radius:3px;flex:none}
+  .footbar .note{font-size:12px;color:var(--ink2);flex:1;min-width:220px}
+  .footbar .note b{color:var(--ink)}
+  .kbd{font-family:"IBM Plex Mono",monospace;font-size:11px;background:var(--chip);border:1px solid var(--line-soft);border-radius:3px;padding:1px 5px}
+
+  @media (max-width:900px){
+    .app{grid-template-columns:1fr}
+    .panel{order:2;max-height:none;position:static;border-right:0;border-top:2px solid var(--line)}
+    .stage{order:1;min-height:70vh}
+    .canvas-wrap{padding:12px}
+    .toolbar{position:static}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ================= controls ================= -->
+  <aside class="panel">
+    <div class="panel-head">
+      <h1>2値・ハーフトーン変換</h1>
+      <p>写真を印刷用のモノクロ1ビット（2値ディザ／網点）に変換する道具。処理はすべてこのブラウザ内で行われます。</p>
+    </div>
+
+    <section class="blk">
+      <h2><span class="no">01</span>画像</h2>
+      <div class="drop" id="dropZone">
+        <div class="big">画像をドロップ</div>
+        <div class="small">または下のボタンから選択／貼り付け（<span class="kbd">Ctrl+V</span>）も可</div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="btn primary" for="fileInput" style="cursor:pointer">ファイルを開く</label>
+        <button class="btn" id="sampleBtn" type="button">テスト画像で試す</button>
+      </div>
+      <input type="file" id="fileInput" accept="image/*" />
+      <p class="hint mono" id="srcInfo">未読み込み</p>
+    </section>
+
+    <section class="blk">
+      <h2><span class="no">02</span>仕上がりサイズ・解像度<span class="sub">入稿サイズ</span></h2>
+      <label class="f" for="presetSel">用紙プリセット</label>
+      <select id="presetSel">
+        <option value="custom">カスタム</option>
+        <option value="297,420">A3（297 × 420 mm）</option>
+        <option value="210,297" selected>A4（210 × 297 mm）</option>
+        <option value="148,210">A5（148 × 210 mm）</option>
+        <option value="257,364">B4（257 × 364 mm）</option>
+        <option value="182,257">B5（182 × 257 mm）</option>
+        <option value="100,148">ハガキ（100 × 148 mm）</option>
+        <option value="91,55">名刺（91 × 55 mm）</option>
+        <option value="1030,728">B2（728 × 1030 mm）</option>
+      </select>
+      <div class="grid2" style="margin-top:8px">
+        <div><label class="f" for="mmW">幅（mm）</label><input type="number" id="mmW" value="210" min="10" max="2000" step="1" /></div>
+        <div><label class="f" for="mmH">高さ（mm）</label><input type="number" id="mmH" value="297" min="10" max="2000" step="1" /></div>
+      </div>
+      <div class="grid2">
+        <div>
+          <label class="f" for="dpiSel">解像度</label>
+          <select id="dpiSel">
+            <option value="150">150 dpi（校正・大判）</option>
+            <option value="300">300 dpi</option>
+            <option value="350" selected>350 dpi（カラー印刷標準）</option>
+            <option value="600">600 dpi（1ビット推奨）</option>
+            <option value="1200">1200 dpi（線画・網点）</option>
+          </select>
+        </div>
+        <div>
+          <label class="f" for="fitSel">画像の合わせ方</label>
+          <select id="fitSel">
+            <option value="cover" selected>切り抜き（全面）</option>
+            <option value="contain">フィット（全体・余白は白）</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn small" id="swapBtn" type="button" style="margin-top:8px">幅と高さを入れ替え（縦横反転）</button>
+      <div class="outbox">
+        <div class="px" id="outPx">— × — px</div>
+        <div class="mm" id="outMm">出力ピクセル数（mm ÷ 25.4 × dpi）</div>
+      </div>
+      <div class="warnbox" id="resWarn"></div>
+      <p class="hint">1ビット画像は中間調がないぶん、<b>600dpi以上</b>にすると網点・ディザの粒が細かく出ます。書き出しPNGには解像度（dpi）情報も埋め込みます。</p>
+    </section>
+
+    <section class="blk">
+      <h2><span class="no">03</span>変換方式</h2>
+      <div class="seg" id="modeSeg" role="group" aria-label="変換方式">
+        <button type="button" data-mode="dither" aria-pressed="true">ディザ</button>
+        <button type="button" data-mode="halftone" aria-pressed="false">ハーフトーン</button>
+        <button type="button" data-mode="threshold" aria-pressed="false">2値しきい値</button>
+      </div>
+
+      <div id="optDither">
+        <label class="f" for="algoSel">ディザ方式</label>
+        <select id="algoSel">
+          <option value="floyd" selected>Floyd–Steinberg（誤差拡散）</option>
+          <option value="atkinson">Atkinson（誤差拡散・軽い）</option>
+          <option value="jjn">Jarvis–Judice–Ninke（誤差拡散・滑らか）</option>
+          <option value="bayer4">Bayer 4×4（組織的・規則模様）</option>
+          <option value="bayer8">Bayer 8×8（組織的・細かい）</option>
+        </select>
+        <p class="hint">誤差拡散は写真向き、組織的ディザはイラストやフラットな絵向きです。</p>
+      </div>
+
+      <div id="optHalftone" style="display:none">
+        <label class="f" for="htShape">網点の形</label>
+        <select id="htShape">
+          <option value="dot" selected>円ドット（AMスクリーン）</option>
+          <option value="square">四角ドット</option>
+          <option value="line">ライン（万線）</option>
+        </select>
+        <div class="slider-row"><label for="htCell">網点の粗さ</label><input type="range" id="htCell" min="3" max="40" step="1" value="9" /><output id="htCellV">9px</output></div>
+        <div class="slider-row"><label for="htAngle">スクリーン角度</label><input type="range" id="htAngle" min="0" max="90" step="1" value="45" /><output id="htAngleV">45°</output></div>
+        <p class="hint">粗さは<b>書き出し解像度でのpx</b>基準です。350dpiで9pxなら約0.65mm／約39線相当。角度はモアレ回避の定番45°が無難です。</p>
+      </div>
+
+      <div id="optThreshold" style="display:none">
+        <div class="slider-row"><label for="thrVal">しきい値</label><input type="range" id="thrVal" min="1" max="254" step="1" value="128" /><output id="thrValV">128</output></div>
+        <p class="hint">この明るさより暗い画素を黒にします。線画・文字の2値化向き。</p>
+      </div>
+
+      <div class="toggle-row">
+        <span class="grow">白黒を反転</span>
+        <span class="switch"><input type="checkbox" id="invertChk" /><span class="tr"></span></span>
+      </div>
+    </section>
+
+    <section class="blk">
+      <h2><span class="no">04</span>トーン調整</h2>
+      <div class="slider-row"><label for="bright">明るさ</label><input type="range" id="bright" min="-100" max="100" step="1" value="0" /><output id="brightV">0</output></div>
+      <div class="slider-row"><label for="contrast">コントラスト</label><input type="range" id="contrast" min="-100" max="100" step="1" value="0" /><output id="contrastV">0</output></div>
+      <div class="slider-row"><label for="gamma">ガンマ</label><input type="range" id="gamma" min="30" max="300" step="1" value="100" /><output id="gammaV">1.00</output></div>
+      <div class="slider-row"><label for="blackPt">黒レベル</label><input type="range" id="blackPt" min="0" max="120" step="1" value="0" /><output id="blackPtV">0</output></div>
+      <div class="slider-row"><label for="whitePt">白レベル</label><input type="range" id="whitePt" min="135" max="255" step="1" value="255" /><output id="whitePtV">255</output></div>
+      <button class="btn small" id="toneReset" type="button">トーン調整をリセット</button>
+    </section>
+
+    <section class="blk">
+      <h2><span class="no">05</span>トーンカーブ</h2>
+      <canvas id="curveCanvas" width="296" height="200"></canvas>
+      <p class="hint">5つの点を上下にドラッグ。左が影、右がハイライト。ポスターの人物だけ締めたいときは左側を下げます。</p>
+      <div class="row" style="margin-top:8px">
+        <button class="btn small" data-curve="linear" type="button">リニア</button>
+        <button class="btn small" data-curve="s" type="button">S字</button>
+        <button class="btn small" data-curve="hard" type="button">硬調</button>
+        <button class="btn small" data-curve="soft" type="button">軟調</button>
+      </div>
+    </section>
+
+    <section class="blk">
+      <h2><span class="no">06</span>覆い焼き・焼き込み<span class="sub">部分補正ブラシ</span></h2>
+      <div class="seg" id="toolSeg" role="group" aria-label="ブラシツール">
+        <button type="button" data-tool="none" aria-pressed="true">オフ</button>
+        <button type="button" data-tool="dodge" aria-pressed="false">覆い焼き</button>
+        <button type="button" data-tool="burn" aria-pressed="false">焼き込み</button>
+        <button type="button" data-tool="erase" aria-pressed="false">消去</button>
+      </div>
+      <div class="slider-row"><label for="brushSize">ブラシ径</label><input type="range" id="brushSize" min="8" max="300" step="2" value="90" /><output id="brushSizeV">90px</output></div>
+      <div class="slider-row"><label for="brushStr">強さ</label><input type="range" id="brushStr" min="2" max="40" step="1" value="14" /><output id="brushStrV">14</output></div>
+      <div class="row">
+        <button class="btn small" id="maskUndo" type="button">1つ戻す</button>
+        <button class="btn small" id="maskClear" type="button">補正を全消去</button>
+      </div>
+      <p class="hint">ツールを選んでプレビュー上をなぞると、その部分だけ明るく（覆い焼き）／暗く（焼き込み）なります。顔を起こす、着物の陰影を締める、といった部分調整用です。</p>
+    </section>
+
+    <section class="blk">
+      <h2><span class="no">07</span>背景削除</h2>
+      <div class="toggle-row">
+        <span class="grow">背景削除を使う</span>
+        <span class="switch"><input type="checkbox" id="bgOn" /><span class="tr"></span></span>
+      </div>
+      <div id="bgOpts" class="cond">
+        <label class="f" for="bgMode">抜き方</label>
+        <select id="bgMode">
+          <option value="person" selected>人物で抜く（人物を自動判定）</option>
+          <option value="modnet">MODNetで抜く（人物マッティング・高精度）</option>
+          <option value="color">色で抜く（背景色との近さ）</option>
+          <option value="bright">明るい背景を抜く（白背景向き）</option>
+        </select>
+        <div id="bgPersonRow">
+          <p class="hint" id="bgPersonStatus" style="margin-top:8px">人物の切り抜きが標準です。背景削除をONにすると、画像から人物だけを自動で判定します。初回だけ判定用モデルの読み込みに少し時間がかかります。</p>
+          <div class="row" style="margin-top:8px">
+            <button class="btn small" id="bgPersonBtn" type="button">人物の切り抜きを実行</button>
+          </div>
+          <p class="hint">「許容差」で人物として残す強さ、「境界ぼかし」で輪郭のなじませ具合を調整できます。輪郭の外側に背景の明るい縁が残るときは「輪郭の収縮」を上げてください。ぼかし／収縮はどちらも<b>入稿サイズ基準のpx</b>で、書き出し時に拡大された後の解像度で効くので、実寸でも縁が甘くなりません。うまく抜けない場合は下の「色で抜く」も試せます。</p>
+        </div>
+        <div id="bgModnetRow" style="display:none">
+          <p class="hint" id="bgModnetStatus" style="margin-top:8px">人物専用のマッティングモデル MODNet（Apache-2.0／商用利用可）で、髪の毛先まで含めた人物のマット（抜きマスク）を推定します。背景削除をONにするか下のボタンを押すと実行します。初回だけ実行環境とモデル（合計 約17MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。</p>
+          <div class="row" style="margin-top:8px">
+            <button class="btn small" id="bgModnetBtn" type="button">MODNetで切り抜きを実行</button>
+          </div>
+          <p class="hint">得られたマットには、上の「人物で抜く」と同じ輪郭整形（飛び地除去・エッジ吸着）と、「許容差」「境界ぼかし」「輪郭の収縮」がそのまま効きます。読み込みや実行に失敗した場合は、「人物で抜く（人物を自動判定）」に切り替えてください。</p>
+        </div>
+        <div id="bgColorRow" style="display:none">
+          <label class="f">背景色 <span class="swatch" id="bgSwatch"></span> <span class="mono" id="bgHex">#FFFFFF</span></label>
+          <div class="row">
+            <button class="btn small" id="bgPickBtn" type="button" aria-pressed="false">画像をクリックして取得</button>
+            <button class="btn small" id="bgAutoBtn" type="button">四隅から自動判定</button>
+          </div>
+        </div>
+        <div class="slider-row"><label for="bgTol">許容差</label><input type="range" id="bgTol" min="2" max="120" step="1" value="32" /><output id="bgTolV">32</output></div>
+        <div class="slider-row"><label for="bgFeather">境界ぼかし</label><input type="range" id="bgFeather" min="0" max="60" step="1" value="10" /><output id="bgFeatherV">10</output></div>
+        <div class="slider-row"><label for="bgShrink">輪郭の収縮</label><input type="range" id="bgShrink" min="0" max="40" step="1" value="8" /><output id="bgShrinkV">8</output></div>
+        <label class="f" for="bgOut">抜いた部分</label>
+        <select id="bgOut">
+          <option value="white" selected>白にする（印刷の地）</option>
+          <option value="alpha">透明にする（PNG透過）</option>
+        </select>
+        <p class="hint">人物写真は「人物で抜く」か「MODNetで抜く」が確実です。背景の色がグラデーションになっていたり、壁に影が落ちていたりしても、色ではなく人物そのものを判定するので抜け残りにくくなります。MODNetは人物専用モデルで輪郭の出方が違うので、同じ写真で両方を比べて選べます。</p>
+      </div>
+    </section>
+
+    <section class="blk">
+      <h2><span class="no">08</span>書き出し</h2>
+      <button class="btn primary" id="exportBtn" type="button" style="width:100%;min-height:48px;font-size:15px">PNGで書き出す（入稿サイズ）</button>
+      <button class="btn" id="exportPrevBtn" type="button" style="width:100%;margin-top:8px">プレビュー解像度で書き出す</button>
+      <p class="hint" id="exportInfo">書き出しは「02」のサイズ・解像度どおりのピクセル数で再計算します（プレビューの拡大縮小とは別計算なので、網点・ディザの粒が正確に出ます）。</p>
+    </section>
+  </aside>
+
+  <!-- ================= stage ================= -->
+  <main class="stage">
+    <div class="toolbar">
+      <div class="seg" id="viewSeg" role="group" aria-label="表示切替" style="min-width:230px">
+        <button type="button" data-view="result" aria-pressed="true">変換後</button>
+        <button type="button" data-view="gray" aria-pressed="false">補正後グレー</button>
+        <button type="button" data-view="orig" aria-pressed="false">原画</button>
+      </div>
+      <span class="sp"></span>
+      <span class="stat" id="zoomStat">—</span>
+      <button class="btn small" id="zoomFit" type="button">画面に合わせる</button>
+      <input type="range" id="zoomRange" min="10" max="400" step="5" value="100" style="width:130px" aria-label="ズーム" />
+    </div>
+
+    <div class="canvas-wrap" id="canvasWrap">
+      <div class="empty" id="emptyState">
+        <div class="t">画像を読み込むと、ここに変換結果が出ます</div>
+        <p>パネルからファイルを選ぶか、画像をこの画面へドロップしてください。<br />まずは「テスト画像で試す」でも構いません。グレーの階調が、黒と白の粒に置き換わっていくのが確認できます。</p>
+      </div>
+      <div class="canvas-holder" id="holder" style="display:none">
+        <canvas id="viewCanvas" width="800" height="600"></canvas>
+      </div>
+    </div>
+
+    <div class="footbar">
+      <canvas id="histCanvas" width="440" height="112"></canvas>
+      <div class="note">
+        <b>ヒストグラム</b>（補正後のグレー分布）。左が影、右がハイライト。山が片側に潰れていると2値化で階調が飛びます。
+        覆い焼き／焼き込み・背景色の取得は、プレビュー上を直接クリック／ドラッグして行います。
+      </div>
+      <div class="note mono" id="stageInfo" style="flex:none;text-align:right"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+"use strict";
+/* ============================== state ============================== */
+var $ = function(id){ return document.getElementById(id); };
+var S = {
+  src: null,            // HTMLCanvasElement of original image (full res)
+  srcName: "image",
+  srcW: 0, srcH: 0,
+  workW: 0, workH: 0,   // preview processing size
+  base: null,           // fitted RGB canvas at preview size
+  mask: null,           // Float32Array workW*workH, -1..1 ( + dodge / - burn )
+  maskUndo: [],
+  tool: "none",         // none|dodge|burn|erase
+  picking: false,
+  view: "result",       // result|gray|orig
+  mode: "dither",
+  curve: [0, 64, 128, 192, 255],  // output values at input 0,64,128,192,255
+  bgColor: {r:255,g:255,b:255},
+  personMask: null,       // canvas, white = person, captured from segmentation
+  personKey: null,        // key the mask was computed for
+  personStatus: "idle",   // idle|loading|ready|error|none
+  personSerial: 0,        // bumped every time a new mask is stored
+  refinedPerson: null,    // cached edge-refined mask canvas {key, canvas}
+  painting: false,
+  lastPt: null,
+  zoom: 1, zoomFit: true
+};
+var PREVIEW_MAX = 1500;
+
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+function clamp01(v){ return v<0?0:(v>1?1:v); }
+
+/* ============================== output size ============================== */
+function outputPx(){
+  var mmW = Math.max(1, parseFloat($("mmW").value)||0);
+  var mmH = Math.max(1, parseFloat($("mmH").value)||0);
+  var dpi = parseInt($("dpiSel").value,10);
+  return { w: Math.round(mmW/25.4*dpi), h: Math.round(mmH/25.4*dpi), mmW:mmW, mmH:mmH, dpi:dpi };
+}
+function updateOutInfo(){
+  var o = outputPx();
+  $("outPx").textContent = o.w.toLocaleString() + " × " + o.h.toLocaleString() + " px";
+  $("outMm").textContent = o.mmW + " × " + o.mmH + " mm / " + o.dpi + " dpi / " + (o.w*o.h/1000000).toFixed(1) + " Mpx";
+  var warn = $("resWarn");
+  if (S.src){
+    var msgs = [];
+    if (S.srcW < o.w*0.7) msgs.push("元画像の幅 " + S.srcW.toLocaleString() + "px に対して出力幅 " + o.w.toLocaleString() + "px と大きく、拡大（補間）になります。ディザの粒は出ますが、元の解像感は上がりません。");
+    if (o.w > 9000 || o.h > 9000) msgs.push("出力が非常に大きいため、書き出しに時間がかかる場合があります。");
+    warn.innerHTML = msgs.join("<br>");
+    warn.className = "warnbox" + (msgs.length ? " show" : "");
+  } else { warn.className = "warnbox"; }
+  updateStageInfo();
+}
+function updateStageInfo(){
+  var o = outputPx();
+  $("stageInfo").innerHTML = S.src
+    ? ("原画 " + S.srcW + "×" + S.srcH + "px<br>出力 " + o.w + "×" + o.h + "px / " + o.dpi + "dpi")
+    : "";
+}
+
+/* ============================== image loading ============================== */
+/* The processing canvas must have the SAME aspect as the export (the output
+   frame), not the source aspect. Previously the preview canvas kept the
+   source aspect and the output frame was letterboxed inside it, while the
+   export filled the frame exactly — so the person/dodge masks, which were
+   captured on the letterboxed preview canvas, were stretched over the
+   differently-shaped export canvas and landed shifted and scaled against
+   the picture (face clipped on one side, subject touching edges the
+   preview never showed). Making the work canvas exactly the output frame
+   makes preview and export the same geometry at any size. */
+function computeWorkDims(){
+  var o = outputPx();
+  var aspect = o.w / o.h;
+  var scale = Math.min(1, PREVIEW_MAX / Math.max(S.srcW, S.srcH));
+  var bw = Math.max(2, Math.round(S.srcW * scale));
+  var bh = Math.max(2, Math.round(S.srcH * scale));
+  var fw = bw, fh = Math.round(bw / aspect);
+  if (fh > bh){ fh = bh; fw = Math.round(bh * aspect); }
+  return { w: Math.max(2, fw), h: Math.max(2, fh) };
+}
+function syncWorkSize(){
+  if (!S.src) return;
+  var d = computeWorkDims();
+  if (d.w === S.workW && d.h === S.workH && S.mask) return;
+  if (S.mask && S.workW > 0 && S.workH > 0){
+    // resample the dodge/burn mask onto the new frame so strokes stay put
+    var mc = document.createElement("canvas"); mc.width = S.workW; mc.height = S.workH;
+    var mctx = mc.getContext("2d"), mid = mctx.createImageData(S.workW, S.workH), md = mid.data, i;
+    for (i = 0; i < S.mask.length; i++){ var mv = Math.round((S.mask[i] * 0.5 + 0.5) * 255); md[i*4] = md[i*4+1] = md[i*4+2] = mv; md[i*4+3] = 255; }
+    mctx.putImageData(mid, 0, 0);
+    var mc2 = document.createElement("canvas"); mc2.width = d.w; mc2.height = d.h;
+    var m2 = mc2.getContext("2d"); m2.imageSmoothingEnabled = true; m2.drawImage(mc, 0, 0, d.w, d.h);
+    var nd = m2.getImageData(0, 0, d.w, d.h).data;
+    var nm = new Float32Array(d.w * d.h);
+    for (i = 0; i < nm.length; i++) nm[i] = nd[i*4] / 255 * 2 - 1;
+    S.mask = nm;
+  } else {
+    S.mask = new Float32Array(d.w * d.h);
+  }
+  S.maskUndo = [];
+  S.workW = d.w; S.workH = d.h;
+  // the person mask was captured on the old frame: force re-segmentation
+  S.personMask = null; S.personKey = null; S.refinedPerson = null;
+  if (S.personStatus !== "loading") S.personStatus = "idle";
+}
+function setSource(canvas, name){
+  S.src = canvas; S.srcW = canvas.width; S.srcH = canvas.height; S.srcName = name || "image";
+  var dims = computeWorkDims();
+  S.workW = dims.w; S.workH = dims.h;
+  S.mask = new Float32Array(S.workW*S.workH);
+  S.maskUndo = [];
+  S.personMask = null; S.personKey = null; S.personStatus = "idle"; S.refinedPerson = null;
+  var ps = $("bgPersonStatus");
+  if (ps) ps.textContent = "人物の切り抜きが標準です。背景削除をONにすると、画像から人物だけを自動で判定します。初回だけ判定用モデルの読み込みに少し時間がかかります。";
+  var ms = $("bgModnetStatus");
+  if (ms) ms.textContent = "人物専用のマッティングモデル MODNet（Apache-2.0／商用利用可）で、髪の毛先まで含めた人物のマット（抜きマスク）を推定します。背景削除をONにするか下のボタンを押すと実行します。初回だけ実行環境とモデル（合計 約17MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。";
+  buildBase();
+  $("srcInfo").textContent = name + " ／ " + S.srcW + " × " + S.srcH + " px";
+  $("emptyState").style.display = "none";
+  $("holder").style.display = "block";
+  S.zoomFit = true;
+  updateOutInfo();
+  requestRender();
+}
+function buildBase(){
+  // fitted RGB canvas at preview size, following fit mode + output aspect
+  var o = outputPx();
+  var c = document.createElement("canvas"); c.width = S.workW; c.height = S.workH;
+  var ctx = c.getContext("2d");
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(0,0,c.width,c.height);
+  drawFitted(ctx, S.src, c.width, c.height, o.w/o.h);
+  S.base = c;
+}
+function drawFitted(ctx, src, tw, th, targetAspect){
+  // draw src into tw x th box, but the *content frame* follows targetAspect:
+  // we render the image into the output-aspect frame, scaled cover/contain.
+  var fit = $("fitSel").value;
+  var frameW = tw, frameH = tw/targetAspect;
+  if (frameH > th){ frameH = th; frameW = th*targetAspect; }
+  var ox = (tw-frameW)/2, oy = (th-frameH)/2;
+  var sa = src.width/src.height;
+  var dw, dh;
+  if (fit === "cover"){
+    if (sa > targetAspect){ dh = frameH; dw = frameH*sa; } else { dw = frameW; dh = frameW/sa; }
+  } else {
+    if (sa > targetAspect){ dw = frameW; dh = frameW/sa; } else { dh = frameH; dw = frameH*sa; }
+  }
+  ctx.save();
+  ctx.beginPath(); ctx.rect(ox,oy,frameW,frameH); ctx.clip();
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(ox,oy,frameW,frameH);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(src, ox+(frameW-dw)/2, oy+(frameH-dh)/2, dw, dh);
+  ctx.restore();
+  return {x:ox, y:oy, w:frameW, h:frameH};
+}
+function loadFile(file){
+  if (!file || !/^image\//.test(file.type)) return;
+  var img = new Image();
+  img.onload = function(){
+    var c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
+    c.getContext("2d").drawImage(img,0,0);
+    URL.revokeObjectURL(img.src);
+    setSource(c, file.name.replace(/\.[^.]+$/,""));
+  };
+  img.src = URL.createObjectURL(file);
+}
+$("fileInput").addEventListener("change", function(e){ loadFile(e.target.files[0]); e.target.value=""; });
+var dz = $("dropZone");
+["dragenter","dragover"].forEach(function(ev){ document.addEventListener(ev, function(e){ e.preventDefault(); dz.classList.add("over"); }); });
+["dragleave","drop"].forEach(function(ev){ document.addEventListener(ev, function(e){ e.preventDefault(); dz.classList.remove("over"); }); });
+document.addEventListener("drop", function(e){ var f = e.dataTransfer.files && e.dataTransfer.files[0]; loadFile(f); });
+document.addEventListener("paste", function(e){
+  var items = e.clipboardData && e.clipboardData.items, i;
+  for (i=0;i<(items?items.length:0);i++){ if (/^image\//.test(items[i].type)){ loadFile(items[i].getAsFile()); break; } }
+});
+
+/* ---- built-in test image: gradients, circles, ramp, type ---- */
+$("sampleBtn").addEventListener("click", function(){
+  var w = 1240, h = 1550, c = document.createElement("canvas"); c.width=w; c.height=h;
+  var x = c.getContext("2d");
+  var g = x.createLinearGradient(0,0,0,h); g.addColorStop(0,"#e8e8e8"); g.addColorStop(.55,"#9a9a9a"); g.addColorStop(1,"#3c3c3c");
+  x.fillStyle = g; x.fillRect(0,0,w,h);
+  var rg = x.createRadialGradient(620,560,60, 620,560,430);
+  rg.addColorStop(0,"#f4f4f4"); rg.addColorStop(.6,"#b5b5b5"); rg.addColorStop(1,"#6f6f6f");
+  x.fillStyle = rg; x.beginPath(); x.arc(620,560,430,0,7); x.fill();
+  x.fillStyle = "#222"; x.beginPath(); x.arc(500,500,52,0,7); x.arc(740,500,52,0,7); x.fill();
+  x.strokeStyle = "#2a2a2a"; x.lineWidth = 16; x.beginPath(); x.arc(620,640,150,.25,Math.PI-.25); x.stroke();
+  x.fillStyle = "#101010"; x.fillRect(0,1120,w,190);
+  x.fillStyle = "#f2f2f2"; x.font = "900 120px 'Noto Sans JP',sans-serif"; x.fillText("網点 Aa 123", 60, 1270);
+  for (var i=0;i<16;i++){ x.fillStyle = "rgb("+(i*17)+","+(i*17)+","+(i*17)+")"; x.fillRect(60+i*70, 1370, 62, 110); }
+  x.fillStyle = "rgba(0,0,0,.55)"; x.font = "700 34px 'Noto Sans JP',sans-serif"; x.fillText("GRAYSCALE RAMP 0—255", 60, 1350);
+  setSource(c, "test-chart");
+});
+
+/* ============================== tone LUT ============================== */
+function curveLUT(){
+  // Catmull-Rom through the 5 control points -> 256 table
+  var xs = [0,64,128,192,255], ys = S.curve, out = new Uint8Array(256), i, j;
+  function pt(k){ return ys[clamp(k,0,4)]; }
+  for (i=0;i<256;i++){
+    var seg = Math.min(3, Math.floor(i/64)), t = (i - xs[seg])/64;
+    var p0=pt(seg-1), p1=pt(seg), p2=pt(seg+1), p3=pt(seg+2);
+    var v = 0.5*((2*p1) + (-p0+p2)*t + (2*p0-5*p1+4*p2-p3)*t*t + (-p0+3*p1-3*p2+p3)*t*t*t);
+    out[i] = clamp(Math.round(v),0,255);
+  }
+  return out;
+}
+var LUT = new Uint8Array(256);
+function buildLUT(){
+  var bright = parseFloat($("bright").value)/100 * 64;      // -64..64
+  var contrast = 1 + parseFloat($("contrast").value)/100;  // 0..2
+  var gamma = parseFloat($("gamma").value)/100;             // 0.3..3
+  var bp = parseFloat($("blackPt").value), wp = parseFloat($("whitePt").value);
+  var curve = curveLUT(), i, v;
+  for (i=0;i<256;i++){
+    v = (i - bp) / Math.max(1,(wp-bp)) * 255;               // levels
+    v = clamp(v,0,255);
+    v = curve[Math.round(v)];                               // tone curve
+    v = Math.pow(clamp01(v/255), gamma) * 255;              // gamma
+    v = (v - 128) * contrast + 128 + bright;                // contrast + brightness
+    LUT[i] = clamp(Math.round(v),0,255);
+  }
+}
+
+/* ====================== person mask refinement ======================
+   The segmentation model returns a low-resolution, soft mask — and the
+   source photos used here are often only a few hundred px wide, while the
+   export is several thousand. Upscaling that raw mask with plain bilinear
+   interpolation widens its soft edge by the upscale factor (a 2px edge at
+   preview size becomes a 15px+ halo at print size) and keeps a rim of
+   background pixels the model included around the silhouette.
+   So the mask is post-processed in three stages:
+   1. cleanPersonMask: keep only the largest connected component and fill
+      its holes, dropping stray specks/islands next to the subject.
+   2. getRefinedPersonCanvas: at (a capped version of) the TARGET size,
+      re-derive the uncertain boundary band from the picture itself —
+      each band pixel is compared with blurred foreground / background
+      colour fields sampled from the definite regions (simple matting),
+      which snaps the edge to the real colour transition of the photo.
+   3. In computeGray, the final threshold is applied at the target size
+      with feather/shrink expressed in output pixels and converted
+      through the mask's local gradient, so the edge width in print
+      pixels is the same at preview and export resolutions. */
+function cleanPersonMask(mc){
+  try {
+    var mw = mc.width, mh = mc.height;
+    var sc = Math.min(1, 480 / Math.max(mw, mh));
+    var sw = Math.max(2, Math.round(mw * sc)), sh = Math.max(2, Math.round(mh * sc));
+    var small = document.createElement("canvas"); small.width = sw; small.height = sh;
+    var sctx = small.getContext("2d");
+    sctx.drawImage(mc, 0, 0, sw, sh);
+    var sd = sctx.getImageData(0, 0, sw, sh).data;
+    var N = sw * sh, bin = new Uint8Array(N), i;
+    for (i = 0; i < N; i++) bin[i] = sd[i * 4] > 127 ? 1 : 0;
+    // largest 4-connected foreground component
+    var label = new Int32Array(N); for (i = 0; i < N; i++) label[i] = -1;
+    var comp = 0, bestId = -1, bestSize = 0, stack = [];
+    for (i = 0; i < N; i++){
+      if (!bin[i] || label[i] >= 0) continue;
+      var size = 0; stack.length = 0; stack.push(i); label[i] = comp;
+      while (stack.length){
+        var q = stack.pop(); size++;
+        var qx = q % sw, qy = (q - qx) / sw;
+        if (qx > 0 && bin[q-1] && label[q-1] < 0){ label[q-1] = comp; stack.push(q-1); }
+        if (qx < sw-1 && bin[q+1] && label[q+1] < 0){ label[q+1] = comp; stack.push(q+1); }
+        if (qy > 0 && bin[q-sw] && label[q-sw] < 0){ label[q-sw] = comp; stack.push(q-sw); }
+        if (qy < sh-1 && bin[q+sw] && label[q+sw] < 0){ label[q+sw] = comp; stack.push(q+sw); }
+      }
+      if (size > bestSize){ bestSize = size; bestId = comp; }
+      comp++;
+    }
+    if (bestId < 0) return mc;
+    // exterior background: flood from the borders over non-foreground
+    var ext = new Uint8Array(N); stack.length = 0;
+    var bx, by;
+    for (bx = 0; bx < sw; bx++){ if (!bin[bx]){ ext[bx] = 1; stack.push(bx); } var bi = (sh-1)*sw+bx; if (!bin[bi]){ ext[bi] = 1; stack.push(bi); } }
+    for (by = 0; by < sh; by++){ var li = by*sw, ri = by*sw+sw-1; if (!bin[li]){ ext[li] = 1; stack.push(li); } if (!bin[ri]){ ext[ri] = 1; stack.push(ri); } }
+    while (stack.length){
+      var r = stack.pop(), rx = r % sw, ry = (r - rx) / sw;
+      if (rx > 0 && !bin[r-1] && !ext[r-1]){ ext[r-1] = 1; stack.push(r-1); }
+      if (rx < sw-1 && !bin[r+1] && !ext[r+1]){ ext[r+1] = 1; stack.push(r+1); }
+      if (ry > 0 && !bin[r-sw] && !ext[r-sw]){ ext[r-sw] = 1; stack.push(r-sw); }
+      if (ry < sh-1 && !bin[r+sw] && !ext[r+sw]){ ext[r+sw] = 1; stack.push(r+sw); }
+    }
+    // valid = largest component, plus enclosed holes (bg not reaching a border)
+    var valid = new Uint8Array(N);
+    for (i = 0; i < N; i++) valid[i] = (label[i] === bestId || (!bin[i] && !ext[i])) ? 1 : 0;
+    var mctx2 = mc.getContext("2d");
+    var img = mctx2.getImageData(0, 0, mw, mh), d = img.data;
+    for (var y = 0; y < mh; y++){
+      var sy = Math.min(sh - 1, Math.floor(y * sc));
+      for (var x = 0; x < mw; x++){
+        var sx = Math.min(sw - 1, Math.floor(x * sc));
+        if (!valid[sy * sw + sx]){ var o = (y * mw + x) * 4; d[o] = d[o+1] = d[o+2] = 0; }
+      }
+    }
+    mctx2.putImageData(img, 0, 0);
+  } catch(e) { /* cleanup is best-effort; the raw mask still works */ }
+  return mc;
+}
+function buildColorField(imgC, alpha, w, h, wantFg, rad){
+  var src = document.createElement("canvas"); src.width = w; src.height = h;
+  var sctx = src.getContext("2d"); sctx.drawImage(imgC, 0, 0);
+  var mk = document.createElement("canvas"); mk.width = w; mk.height = h;
+  var mkx = mk.getContext("2d"), mid = mkx.createImageData(w, h), md = mid.data, i;
+  for (i = 0; i < alpha.length; i++){
+    var on = wantFg ? (alpha[i] > 0.65) : (alpha[i] < 0.35);
+    md[i*4] = md[i*4+1] = md[i*4+2] = 255; md[i*4+3] = on ? 255 : 0;
+  }
+  mkx.putImageData(mid, 0, 0);
+  sctx.globalCompositeOperation = "destination-in";
+  sctx.drawImage(mk, 0, 0);
+  var out = document.createElement("canvas"); out.width = w; out.height = h;
+  var octx = out.getContext("2d");
+  try { octx.filter = "blur(" + rad + "px)"; } catch(e) {}
+  octx.drawImage(src, 0, 0);
+  try { octx.filter = "none"; } catch(e) {}
+  return octx.getImageData(0, 0, w, h).data;
+}
+function getRefinedPersonCanvas(w, h, imgCanvas){
+  if (!S.personMask) return null;
+  var key = [S.srcName, S.srcW, S.srcH, S.personSerial || 0, w, h].join("|");
+  if (S.refinedPerson && S.refinedPerson.key === key) return S.refinedPerson.canvas;
+  var scale = Math.min(1, 2200 / Math.max(w, h));
+  var rw = Math.max(2, Math.round(w * scale)), rh = Math.max(2, Math.round(h * scale));
+  var ac = document.createElement("canvas"); ac.width = rw; ac.height = rh;
+  var actx = ac.getContext("2d");
+  actx.imageSmoothingEnabled = true; actx.imageSmoothingQuality = "high";
+  actx.drawImage(S.personMask, 0, 0, rw, rh);
+  var idata = actx.getImageData(0, 0, rw, rh), dd = idata.data;
+  var alpha = new Float32Array(rw * rh), i;
+  // steepen the model's soft probabilities before matting
+  for (i = 0; i < alpha.length; i++) alpha[i] = clamp01((dd[i*4] / 255 - 0.5) * 1.3 + 0.5);
+  try {
+    var ic = document.createElement("canvas"); ic.width = rw; ic.height = rh;
+    var ictx = ic.getContext("2d"); ictx.drawImage(imgCanvas, 0, 0, rw, rh);
+    var imgD = ictx.getImageData(0, 0, rw, rh).data;
+    var rad = Math.max(3, Math.round(Math.min(rw, rh) * 0.02));
+    var fgF = buildColorField(ic, alpha, rw, rh, true, rad);
+    var bgF = buildColorField(ic, alpha, rw, rh, false, rad);
+    if (fgF && bgF){
+      for (i = 0; i < alpha.length; i++){
+        if (alpha[i] <= 0.03 || alpha[i] >= 0.97) continue;  // boundary band only
+        var o = i * 4;
+        if (fgF[o+3] < 30 || bgF[o+3] < 30) continue;        // colour field unreliable here
+        var dF = (imgD[o]-fgF[o])*(imgD[o]-fgF[o]) + (imgD[o+1]-fgF[o+1])*(imgD[o+1]-fgF[o+1]) + (imgD[o+2]-fgF[o+2])*(imgD[o+2]-fgF[o+2]);
+        var dB = (imgD[o]-bgF[o])*(imgD[o]-bgF[o]) + (imgD[o+1]-bgF[o+1])*(imgD[o+1]-bgF[o+1]) + (imgD[o+2]-bgF[o+2])*(imgD[o+2]-bgF[o+2]);
+        var ratio = dB / (dF + dB + 0.01);
+        alpha[i] = clamp01(0.5 + (ratio - 0.5) * 1.9);
+      }
+    }
+    // Snap the transition onto the photo's own edge: where the picture
+    // itself has a strong luminance step, pull band pixels decisively
+    // toward the side they are already on. The cut then follows the
+    // photographed contour (sharp on clear material like a black haori
+    // against a pale wall) instead of the model's soft ramp.
+    for (i = 0; i < alpha.length; i++){
+      if (alpha[i] <= 0.02 || alpha[i] >= 0.98) continue;
+      var o2 = i * 4, xx = i % rw;
+      var lumC = 0.2126*imgD[o2] + 0.7152*imgD[o2+1] + 0.0722*imgD[o2+2];
+      var lumR = xx + 1 < rw ? 0.2126*imgD[o2+4] + 0.7152*imgD[o2+5] + 0.0722*imgD[o2+6] : lumC;
+      var lumD = i + rw < alpha.length ? 0.2126*imgD[o2+rw*4] + 0.7152*imgD[o2+rw*4+1] + 0.0722*imgD[o2+rw*4+2] : lumC;
+      var gImg = Math.max(Math.abs(lumR - lumC), Math.abs(lumD - lumC)) / 255;
+      if (gImg > 0.06){
+        var snap = clamp01((gImg - 0.06) * 4);
+        var tgt = alpha[i] >= 0.5 ? 1 : 0;
+        alpha[i] = alpha[i] + (tgt - alpha[i]) * snap * 0.85;
+      }
+    }
+  } catch(e) { /* matting is best-effort; steepened mask still applies */ }
+  for (i = 0; i < alpha.length; i++){ var v = Math.round(alpha[i] * 255); dd[i*4] = dd[i*4+1] = dd[i*4+2] = v; dd[i*4+3] = 255; }
+  actx.putImageData(idata, 0, 0);
+  S.refinedPerson = { key: key, canvas: ac };
+  return ac;
+}
+
+/* ============================== processing ============================== */
+function computeGray(w, h, forExport){
+  // returns {gray:Float32Array(0..1), alpha:Float32Array(0..1), frame:{...}}
+  var o = outputPx();
+  var c = document.createElement("canvas"); c.width=w; c.height=h;
+  var ctx = c.getContext("2d");
+  ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,w,h);
+  var frame = drawFitted(ctx, S.src, w, h, o.w/o.h);
+  var img = ctx.getImageData(0,0,w,h), d = img.data;
+  var n = w*h, gray = new Float32Array(n), alpha = new Float32Array(n), keep = new Float32Array(n);
+
+  // mask resampled to this size
+  var maskScaled = null;
+  if (S.mask){
+    var mc = document.createElement("canvas"); mc.width=S.workW; mc.height=S.workH;
+    var mctx = mc.getContext("2d"), mid = mctx.createImageData(S.workW,S.workH), md = mid.data;
+    for (var i=0;i<n && i<S.mask.length;i++){ var mv = Math.round((S.mask[i]*0.5+0.5)*255); md[i*4]=md[i*4+1]=md[i*4+2]=mv; md[i*4+3]=255; }
+    mctx.putImageData(mid,0,0);
+    var mc2 = document.createElement("canvas"); mc2.width=w; mc2.height=h;
+    var m2 = mc2.getContext("2d"); m2.imageSmoothingEnabled=true; m2.drawImage(mc,0,0,w,h);
+    maskScaled = m2.getImageData(0,0,w,h).data;
+  }
+
+  var bgOn = $("bgOn").checked, bgMode = $("bgMode").value, bgOut = $("bgOut").value;
+  var tol = parseFloat($("bgTol").value), feather = Math.max(1, parseFloat($("bgFeather").value));
+  var shrinkVal = $("bgShrink") ? parseFloat($("bgShrink").value) : 8;
+  var bc = S.bgColor;
+
+  // person-segmentation mask resampled to this size (R channel: 255 = person)
+  var personScaled = null;
+  if (bgOn && (bgMode === "person" || bgMode === "modnet") && S.personMask){
+    var pc = document.createElement("canvas"); pc.width = w; pc.height = h;
+    var pctx = pc.getContext("2d");
+    pctx.imageSmoothingEnabled = true; pctx.imageSmoothingQuality = "high";
+    var refinedMask = getRefinedPersonCanvas(w, h, c);
+    pctx.drawImage(refinedMask || S.personMask, 0, 0, w, h);
+    try { personScaled = pctx.getImageData(0,0,w,h).data; } catch(e) { personScaled = null; }
+  }
+  for (var p=0;p<n;p++){
+    var r=d[p*4], gg=d[p*4+1], b=d[p*4+2];
+    var lum = 0.2126*r + 0.7152*gg + 0.0722*b;
+    var v = LUT[clamp(Math.round(lum),0,255)] / 255;
+    if (maskScaled){ v = clamp01(v + (maskScaled[p*4]/255 - 0.5) * 1.2); }
+    var a = 1;
+    if (bgOn){
+      var f = 0; // 1 = fully background
+      if ((bgMode === "person" || bgMode === "modnet") && personScaled){
+        // Person probability 0..1 after refinement. The final cut is made
+        // HERE, at the current resolution (full export size when writing):
+        // feather and shrink are given in output (print) pixels and are
+        // converted into alpha units through the mask's local gradient,
+        // so a 10px edge stays 10px at 2,894px export width instead of
+        // widening with the upscale factor. shrink pulls the boundary
+        // inward by that many print pixels to cut the light background
+        // rim the raw model mask tends to keep around the silhouette.
+        var pp = personScaled[p*4] / 255;
+        var keepThr = clamp(0.52 - (tol - 32) * 0.004, 0.22, 0.82);
+        var pxX = p % w;
+        var gxE = pxX + 1 < w ? Math.abs(pp - personScaled[(p+1)*4] / 255) : 0;
+        var gyE = p + w < n ? Math.abs(pp - personScaled[(p+w)*4] / 255) : 0;
+        var gE = Math.max(Math.max(gxE, gyE), 0.02);
+        var scaleE = w / Math.max(1, o.w);
+        var thrP = clamp(keepThr + shrinkVal * scaleE * gE, 0.05, 0.97);
+        var soft = clamp(Math.max(0.6, feather) * scaleE * gE, 0.012, 0.35);
+        f = clamp01((thrP + soft - pp) / (soft * 2));
+        if (pp < thrP - soft) f = 1;
+        if (pp > thrP + soft) f = 0;
+      } else if (bgMode === "color"){
+        var dist = Math.sqrt((r-bc.r)*(r-bc.r)*0.30 + (gg-bc.g)*(gg-bc.g)*0.59 + (b-bc.b)*(b-bc.b)*0.11) * 1.8;
+        f = clamp01((tol + feather - dist) / (feather*2));
+        if (dist < tol - feather) f = 1;
+      } else {
+        var thr = 255 - tol*1.6;
+        f = clamp01((lum - (thr - feather)) / (feather*2));
+        if (lum > thr + feather) f = 1;
+      }
+      if (bgOut === "alpha"){ a = 1 - f; v = v + (1-v)*f*0; if (f>0.98) v = 1; }
+      else { v = v + (1 - v) * f; } // blend to white
+    }
+    gray[p] = v; alpha[p] = a;
+    // keep = how much of this pixel belongs to the subject (1 = subject).
+    // binarize() uses it as an error-diffusion barrier at the cut edge.
+    keep[p] = bgOn ? 1 - f : 1;
+  }
+  return { gray: gray, alpha: alpha, keep: keep, frame: frame };
+}
+
+var BAYER4 = [[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]];
+var BAYER8 = [
+ [0,32,8,40,2,34,10,42],[48,16,56,24,50,18,58,26],[12,44,4,36,14,46,6,38],[60,28,52,20,62,30,54,22],
+ [3,35,11,43,1,33,9,41],[51,19,59,27,49,17,57,25],[15,47,7,39,13,45,5,37],[63,31,55,23,61,29,53,21]];
+function binarize(gray, w, h, keep){
+  // returns Uint8Array 0=black 1=white
+  // keep (0..1, 1 = subject) is the background-removal mask. Pixels that are
+  // mostly background (keep < 0.5) are forced white AND act as a barrier for
+  // error diffusion: without this, the quantisation error of the dark
+  // silhouette edge diffuses outward into the cut-away background and flips
+  // near-white pixels to black, which shows up as a spray of dots bleeding
+  // outside the contour no matter how tight the mask itself is cut.
+  var out = new Uint8Array(w*h), i, x, y;
+  var inv = $("invertChk").checked;
+  function isBg(p){ return keep && keep[p] < 0.5; }
+  function val(p){ var v = gray[p]; return inv ? 1-v : v; }
+  var bgVal = inv ? 0 : 1; // "paper white" after inversion
+  if (S.mode === "threshold"){
+    var t = parseFloat($("thrVal").value)/255;
+    for (i=0;i<w*h;i++) out[i] = isBg(i) ? bgVal : (val(i) >= t ? 1 : 0);
+  } else if (S.mode === "dither"){
+    var algo = $("algoSel").value;
+    if (algo === "bayer4" || algo === "bayer8"){
+      var m = algo === "bayer4" ? BAYER4 : BAYER8, sz = m.length, div = sz*sz;
+      for (y=0;y<h;y++) for (x=0;x<w;x++){ var p=y*w+x; out[p] = isBg(p) ? bgVal : (val(p) * div > (m[y%sz][x%sz] + 0.5) ? 1 : 0); }
+    } else {
+      var work = new Float32Array(w*h);
+      for (i=0;i<w*h;i++) work[i] = isBg(i) ? bgVal : val(i);
+      var kernel;
+      if (algo === "floyd") kernel = {div:16, taps:[[1,0,7],[-1,1,3],[0,1,5],[1,1,1]]};
+      else if (algo === "atkinson") kernel = {div:8, taps:[[1,0,1],[2,0,1],[-1,1,1],[0,1,1],[1,1,1],[0,2,1]]};
+      else kernel = {div:48, taps:[[1,0,7],[2,0,5],[-2,1,3],[-1,1,5],[0,1,7],[1,1,5],[2,1,3],[-2,2,1],[-1,2,3],[0,2,5],[1,2,3],[2,2,1]]};
+      for (y=0;y<h;y++) for (x=0;x<w;x++){
+        var pp = y*w+x;
+        if (isBg(pp)){ out[pp] = bgVal; work[pp] = bgVal; continue; }
+        var old = work[pp], nw = old >= 0.5 ? 1 : 0;
+        out[pp] = nw;
+        var err = old - nw;
+        if (err !== 0) for (var k=0;k<kernel.taps.length;k++){
+          var nx = x+kernel.taps[k][0], ny = y+kernel.taps[k][1];
+          if (nx>=0 && nx<w && ny<h && !isBg(ny*w+nx)) work[ny*w+nx] += err * kernel.taps[k][2] / kernel.div;
+        }
+      }
+    }
+  }
+  return out;
+}
+function sampleGray(gray, w, h, fx, fy){
+  var x = clamp(Math.round(fx),0,w-1), y = clamp(Math.round(fy),0,h-1);
+  return gray[y*w+x];
+}
+function renderHalftone(ctx, gray, alpha, w, h, cellScale){
+  var cell = Math.max(2, parseFloat($("htCell").value) * (cellScale || 1));
+  var ang = parseFloat($("htAngle").value) * Math.PI/180;
+  var shape = $("htShape").value;
+  var inv = $("invertChk").checked;
+  var cosA = Math.cos(ang), sinA = Math.sin(ang);
+  var diag = Math.sqrt(w*w + h*h);
+  var transparent = $("bgOn").checked && $("bgOut").value === "alpha";
+  if (!transparent){ ctx.fillStyle = inv ? "#000" : "#fff"; ctx.fillRect(0,0,w,h); }
+  ctx.fillStyle = inv ? "#fff" : "#000";
+  ctx.strokeStyle = inv ? "#fff" : "#000";
+  function darkAt(cx, cy){
+    var v = sampleGray(gray, w, h, cx, cy);
+    var a = sampleGray(alpha, w, h, cx, cy);
+    if (a < 0.4) return -1;
+    var d = 1 - v; return inv ? 1-d : d;
+  }
+  var u, vv;
+  if (shape === "line"){
+    ctx.lineCap = "butt";
+    for (vv = -diag; vv < diag; vv += cell){
+      var started = false;
+      ctx.beginPath();
+      for (u = -diag; u < diag; u += cell){
+        var cx = w/2 + u*cosA - vv*sinA, cy = h/2 + u*sinA + vv*cosA;
+        if (cx < -cell || cy < -cell || cx > w+cell || cy > h+cell){ started=false; continue; }
+        var dk = darkAt(cx, cy);
+        if (dk <= 0.01){ started = false; continue; }
+        ctx.lineWidth = Math.max(0.4, dk * cell * 1.25);
+        var x0 = w/2 + (u-cell/2)*cosA - vv*sinA, y0 = h/2 + (u-cell/2)*sinA + vv*cosA;
+        var x1 = w/2 + (u+cell/2)*cosA - vv*sinA, y1 = h/2 + (u+cell/2)*sinA + vv*cosA;
+        ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
+        started = true;
+      }
+    }
+    return;
+  }
+  for (vv = -diag; vv < diag; vv += cell){
+    for (u = -diag; u < diag; u += cell){
+      var cx2 = w/2 + u*cosA - vv*sinA, cy2 = h/2 + u*sinA + vv*cosA;
+      if (cx2 < -cell || cy2 < -cell || cx2 > w+cell || cy2 > h+cell) continue;
+      var d2 = darkAt(cx2, cy2);
+      if (d2 <= 0.004) continue;
+      if (shape === "dot"){
+        var r = cell * 0.72 * Math.sqrt(d2);
+        ctx.beginPath(); ctx.arc(cx2, cy2, r, 0, 7); ctx.fill();
+      } else {
+        var s = cell * 1.05 * Math.sqrt(d2);
+        ctx.save(); ctx.translate(cx2, cy2); ctx.rotate(ang);
+        ctx.fillRect(-s/2, -s/2, s, s); ctx.restore();
+      }
+    }
+  }
+}
+</script>
+<script>
+"use strict";
+/* ============================== render ============================== */
+var viewCanvas = $("viewCanvas"), vctx = viewCanvas.getContext("2d");
+var renderQueued = false;
+function requestRender(){
+  if (renderQueued) return; renderQueued = true;
+  requestAnimationFrame(function(){ renderQueued = false; render(); });
+}
+function render(){
+  if (!S.src) return;
+  buildLUT();
+  syncWorkSize();
+  buildBase();
+  ensurePersonMask();
+  var w = S.workW, h = S.workH;
+  viewCanvas.width = w; viewCanvas.height = h;
+  var res = computeGray(w, h, false);
+  drawHistogram(res.gray);
+  if (S.view === "orig"){
+    vctx.clearRect(0,0,w,h); vctx.drawImage(S.base,0,0);
+  } else if (S.view === "gray" || S.mode === "halftone" && false){
+    paintGray(vctx, res, w, h);
+  } else if (S.mode === "halftone"){
+    vctx.clearRect(0,0,w,h);
+    renderHalftone(vctx, res.gray, res.alpha, w, h, w / Math.max(1, outputPx().w));
+  } else {
+    var bin = binarize(res.gray, w, h, res.keep);
+    paintBinary(vctx, bin, res.alpha, w, h);
+  }
+  applyZoom();
+  $("stageInfo").innerHTML = "プレビュー " + w + "×" + h + "px（処理用）<br>" + $("stageInfo").innerHTML.split("<br>").slice(1).join("<br>");
+  updateStageInfo2();
+}
+function updateStageInfo2(){
+  var o = outputPx();
+  $("stageInfo").innerHTML = "プレビュー " + S.workW + "×" + S.workH + "px<br>出力 " + o.w.toLocaleString() + "×" + o.h.toLocaleString() + "px / " + o.dpi + "dpi";
+}
+function paintGray(ctx, res, w, h){
+  var img = ctx.createImageData(w,h), d = img.data;
+  for (var p=0;p<w*h;p++){
+    var v = Math.round(res.gray[p]*255);
+    d[p*4]=v; d[p*4+1]=v; d[p*4+2]=v; d[p*4+3]=Math.round(res.alpha[p]*255);
+  }
+  ctx.putImageData(img,0,0);
+}
+function paintBinary(ctx, bin, alpha, w, h){
+  var img = ctx.createImageData(w,h), d = img.data;
+  var transparent = $("bgOn").checked && $("bgOut").value === "alpha";
+  for (var p=0;p<w*h;p++){
+    var v = bin[p] ? 255 : 0;
+    d[p*4]=v; d[p*4+1]=v; d[p*4+2]=v;
+    d[p*4+3] = transparent ? Math.round(alpha[p]*255) : 255;
+  }
+  ctx.putImageData(img,0,0);
+}
+function drawHistogram(gray){
+  var hc = $("histCanvas"), x = hc.getContext("2d"), W = hc.width, H = hc.height;
+  var bins = new Float32Array(128), i;
+  for (i=0;i<gray.length;i+=3) bins[clamp(Math.floor(gray[i]*127.99),0,127)]++;
+  var max = 0; for (i=0;i<128;i++) max = Math.max(max, bins[i]);
+  var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  x.clearRect(0,0,W,H);
+  x.fillStyle = dark ? "#f0efe9" : "#17171a";
+  for (i=0;i<128;i++){
+    var bh = max ? (bins[i]/max)*(H-14) : 0;
+    x.fillRect(i*(W/128), H-bh, Math.max(1,W/128-0.5), bh);
+  }
+  x.fillStyle = "#cf2b23"; x.fillRect(0, H-2, W, 2);
+}
+
+/* ============================== zoom ============================== */
+function applyZoom(){
+  if (!S.src) return;
+  var wrap = $("canvasWrap");
+  if (S.zoomFit){
+    var aw = Math.max(200, wrap.clientWidth - 30), ah = Math.max(200, wrap.clientHeight - 30);
+    S.zoom = Math.min(aw / S.workW, ah / S.workH);
+    if (S.zoom > 1) S.zoom = Math.min(S.zoom, 1.5);
+  }
+  viewCanvas.style.width = Math.round(S.workW * S.zoom) + "px";
+  viewCanvas.style.height = Math.round(S.workH * S.zoom) + "px";
+  $("zoomStat").textContent = Math.round(S.zoom*100) + "%";
+  $("zoomRange").value = clamp(Math.round(S.zoom*100), 10, 400);
+}
+$("zoomFit").addEventListener("click", function(){ S.zoomFit = true; applyZoom(); });
+$("zoomRange").addEventListener("input", function(){
+  S.zoomFit = false; S.zoom = parseFloat(this.value)/100; applyZoom();
+});
+window.addEventListener("resize", function(){ if (S.zoomFit) applyZoom(); });
+
+/* ============================== controls wiring ============================== */
+function segWire(id, attr, cb){
+  var el = $(id);
+  el.addEventListener("click", function(e){
+    var b = e.target.closest("button"); if (!b) return;
+    var btns = el.querySelectorAll("button"), i;
+    for (i=0;i<btns.length;i++) btns[i].setAttribute("aria-pressed","false");
+    b.setAttribute("aria-pressed","true");
+    cb(b.getAttribute(attr));
+  });
+}
+segWire("modeSeg","data-mode", function(m){
+  S.mode = m;
+  $("optDither").style.display = m==="dither" ? "block" : "none";
+  $("optHalftone").style.display = m==="halftone" ? "block" : "none";
+  $("optThreshold").style.display = m==="threshold" ? "block" : "none";
+  requestRender();
+});
+segWire("viewSeg","data-view", function(v){ S.view = v; requestRender(); });
+segWire("toolSeg","data-tool", function(t){
+  S.tool = t;
+  viewCanvas.classList.toggle("brush", t!=="none");
+});
+function sliderWire(id, outId, fmt){
+  var el = $(id);
+  var show = function(){ if (outId) $(outId).textContent = fmt ? fmt(el.value) : el.value; };
+  el.addEventListener("input", function(){ show(); requestRender(); });
+  show();
+}
+sliderWire("bright","brightV"); sliderWire("contrast","contrastV");
+sliderWire("gamma","gammaV", function(v){ return (v/100).toFixed(2); });
+sliderWire("blackPt","blackPtV"); sliderWire("whitePt","whitePtV");
+sliderWire("thrVal","thrValV");
+sliderWire("htCell","htCellV", function(v){ return v+"px"; });
+sliderWire("htAngle","htAngleV", function(v){ return v+"°"; });
+sliderWire("bgTol","bgTolV"); sliderWire("bgFeather","bgFeatherV"); sliderWire("bgShrink","bgShrinkV");
+sliderWire("brushSize","brushSizeV", function(v){ return v+"px"; });
+sliderWire("brushStr","brushStrV");
+["algoSel","htShape","fitSel"].forEach(function(id){ $(id).addEventListener("change", function(){ requestRender(); }); });
+$("invertChk").addEventListener("change", requestRender);
+$("toneReset").addEventListener("click", function(){
+  ["bright","contrast","blackPt"].forEach(function(id){ $(id).value = 0; });
+  $("gamma").value = 100; $("whitePt").value = 255;
+  ["bright","contrast","gamma","blackPt","whitePt"].forEach(function(id){ $(id).dispatchEvent(new Event("input")); });
+  S.curve = [0,64,128,192,255]; drawCurve(); requestRender();
+});
+$("presetSel").addEventListener("change", function(){
+  if (this.value === "custom") return;
+  var parts = this.value.split(",");
+  $("mmW").value = parts[0]; $("mmH").value = parts[1];
+  updateOutInfo(); requestRender();
+});
+["mmW","mmH"].forEach(function(id){
+  $(id).addEventListener("input", function(){ $("presetSel").value = "custom"; updateOutInfo(); requestRender(); });
+});
+$("dpiSel").addEventListener("change", function(){ updateOutInfo(); requestRender(); });
+$("swapBtn").addEventListener("click", function(){
+  var t = $("mmW").value; $("mmW").value = $("mmH").value; $("mmH").value = t;
+  $("presetSel").value = "custom"; updateOutInfo(); requestRender();
+});
+
+/* ================= person segmentation (MediaPipe Selfie Segmentation) =================
+   Person-first background removal: a segmentation model decides person vs.
+   background per pixel, so gradient walls / shadows that defeat colour-keying
+   still cut out. The model + wasm are loaded from CDN on first use only and
+   inference runs entirely in this browser. Colour keying stays as a fallback. */
+var segInstance = null, segScriptPromise = null, segPending = null;
+function personKey(){
+  if (!S.src) return null;
+  var o = outputPx();
+  return [S.srcName, S.srcW, S.srcH, S.workW, S.workH, $("fitSel").value, o.w, o.h, $("bgMode").value].join("|");
+}
+function setPersonStatus(st, msg){
+  S.personStatus = st;
+  var isMod = $("bgMode") && $("bgMode").value === "modnet";
+  var el = $(isMod ? "bgModnetStatus" : "bgPersonStatus");
+  if (el && msg) el.textContent = msg;
+  var btn = $(isMod ? "bgModnetBtn" : "bgPersonBtn");
+  if (btn) btn.disabled = (st === "loading");
+}
+function loadSegScript(){
+  if (window.SelfieSegmentation) return Promise.resolve();
+  if (segScriptPromise) return segScriptPromise;
+  segScriptPromise = new Promise(function(resolve, reject){
+    var urls = [
+      "https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js",
+      "https://unpkg.com/@mediapipe/selfie_segmentation/selfie_segmentation.js"
+    ];
+    var i = 0;
+    (function tryNext(){
+      if (window.SelfieSegmentation) { resolve(); return; }
+      if (i >= urls.length) { reject(new Error("script load failed")); return; }
+      var s = document.createElement("script");
+      s.src = urls[i++]; s.crossOrigin = "anonymous";
+      s.onload = function(){ window.SelfieSegmentation ? resolve() : tryNext(); };
+      s.onerror = tryNext;
+      document.head.appendChild(s);
+    })();
+  });
+  return segScriptPromise;
+}
+function getSegInstance(){
+  if (segInstance) return segInstance;
+  segInstance = new window.SelfieSegmentation({
+    locateFile: function(file){
+      return "https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/" + file;
+    }
+  });
+  // modelSelection 1 = general (256x384, full / upper body); 0 is a square
+  // selfie model tuned for faces close to the camera.
+  segInstance.setOptions({ modelSelection: 1 });
+  segInstance.onResults(function(results){
+    var pending = segPending; segPending = null;
+    if (!pending) return;
+    try {
+      if (!results || !results.segmentationMask) throw new Error("no mask");
+      var w = pending.canvas.width, h = pending.canvas.height;
+      var mc = document.createElement("canvas"); mc.width = w; mc.height = h;
+      var mctx = mc.getContext("2d");
+      mctx.drawImage(results.segmentationMask, 0, 0, w, h);
+      cleanPersonMask(mc);
+      // coverage check: an all-background / all-person mask means no person found
+      var sample = mctx.getImageData(0, 0, w, h).data, sum = 0, cnt = 0, i;
+      for (i = 0; i < sample.length; i += 4 * 97) { sum += sample[i]; cnt++; }
+      var cover = cnt ? (sum / cnt) / 255 : 0;
+      if (cover < 0.005 || cover > 0.995){
+        S.personMask = null; S.personKey = null;
+        setPersonStatus("none", "人物が検出できませんでした。人物が大きく写った写真で試すか、「色で抜く」に切り替えてください。");
+        requestRender(); return;
+      }
+      S.personMask = mc; S.personKey = pending.key;
+      S.personSerial = (S.personSerial || 0) + 1; S.refinedPerson = null;
+      setPersonStatus("ready", "人物を検出しました（画像の約" + Math.round(cover * 100) + "%）。輪郭が食い込む／残る場合は「許容差」と「境界ぼかし」で、輪郭の外側に背景の縁が残る場合は「輪郭の収縮」で調整してください。");
+      requestRender();
+    } catch(err){
+      S.personMask = null; S.personKey = null;
+      setPersonStatus("error", "人物の判定に失敗しました。通信環境を確認して再実行するか、「色で抜く」をお試しください。");
+      requestRender();
+    }
+  });
+  return segInstance;
+}
+/* ================= MODNet portrait matting (ONNX Runtime Web) =================
+   MODNet (Apache-2.0, commercial use OK) is a portrait-matting model: it
+   outputs a soft alpha matte of the person instead of a hard segmentation
+   label, which keeps fine hair edges. The ONNX Runtime Web classic build
+   and the quantized model (~6.6MB, Xenova/modnet on Hugging Face) are
+   loaded from CDN on first use only; inference runs entirely in this
+   browser and the photo never leaves the page. The resulting matte is
+   stored in the same S.personMask slot as the MediaPipe mask, so the
+   existing refinement (cleanup + edge snapping), threshold / feather /
+   shrink handling, dither barrier and export guard all apply unchanged. */
+var modnetSession = null, modnetOrtPromise = null, modnetModelPromise = null, modnetPending = null;
+var MODNET_MODEL_URLS = [
+  "https://huggingface.co/Xenova/modnet/resolve/main/onnx/model_quantized.onnx",
+  "https://huggingface.co/Xenova/modnet/resolve/main/onnx/model.onnx"
+];
+function loadOrtScript(){
+  if (window.ort) return Promise.resolve();
+  if (modnetOrtPromise) return modnetOrtPromise;
+  modnetOrtPromise = new Promise(function(resolve, reject){
+    var urls = [
+      "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.min.js",
+      "https://unpkg.com/onnxruntime-web@1.17.3/dist/ort.min.js"
+    ];
+    var i = 0;
+    (function tryNext(){
+      if (window.ort) { resolve(); return; }
+      if (i >= urls.length) { reject(new Error("ort script load failed")); return; }
+      var s = document.createElement("script");
+      s.src = urls[i++]; s.crossOrigin = "anonymous";
+      s.onload = function(){ window.ort ? resolve() : tryNext(); };
+      s.onerror = tryNext;
+      document.head.appendChild(s);
+    })();
+  });
+  return modnetOrtPromise;
+}
+function getModnetSession(){
+  if (modnetSession) return Promise.resolve(modnetSession);
+  if (modnetModelPromise) return modnetModelPromise;
+  modnetModelPromise = loadOrtScript().then(function(){
+    try {
+      window.ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/";
+      window.ort.env.wasm.numThreads = 1; // no cross-origin isolation on plain hosting
+    } catch(e) {}
+    var tryUrl = function(idx){
+      if (idx >= MODNET_MODEL_URLS.length) throw new Error("model load failed");
+      return fetch(MODNET_MODEL_URLS[idx]).then(function(r){
+        if (!r.ok) throw new Error("model http " + r.status);
+        return r.arrayBuffer();
+      }).then(function(buf){
+        return window.ort.InferenceSession.create(buf, { executionProviders: ["wasm"] });
+      }).catch(function(){ return tryUrl(idx + 1); });
+    };
+    return tryUrl(0);
+  }).then(function(sess){
+    modnetSession = sess;
+    return sess;
+  }).catch(function(err){
+    modnetModelPromise = null;
+    throw err;
+  });
+  return modnetModelPromise;
+}
+function ensureModnetMask(){
+  var key = personKey();
+  if (!key) return;
+  if (S.personMask && S.personKey === key) return;
+  if (S.personStatus === "loading" && modnetPending && modnetPending.key === key) return;
+  if (!S.base) buildBase();
+  var snapshot = S.base;
+  modnetPending = { key: key };
+  setPersonStatus("loading", "MODNetで人物マットを推定中です…（初回は実行環境とモデルの読み込みで少し時間がかかります）");
+  requestRender();
+  getModnetSession().then(function(sess){
+    // MODNet preprocessor: shortest edge -> 512, both sides multiples of 32,
+    // rescale 1/255, normalize with mean/std 0.5 (input name "input",
+    // output name "output", verified against the published ONNX graph).
+    var bw = snapshot.width, bh = snapshot.height;
+    var scale = 512 / Math.min(bw, bh);
+    var rw = Math.max(32, Math.round(bw * scale / 32) * 32);
+    var rh = Math.max(32, Math.round(bh * scale / 32) * 32);
+    var ic = document.createElement("canvas"); ic.width = rw; ic.height = rh;
+    var ictx = ic.getContext("2d");
+    ictx.imageSmoothingEnabled = true; ictx.imageSmoothingQuality = "high";
+    ictx.drawImage(snapshot, 0, 0, rw, rh);
+    var px = ictx.getImageData(0, 0, rw, rh).data;
+    var n = rw * rh, input = new Float32Array(3 * n), i;
+    for (i = 0; i < n; i++){
+      input[i] = (px[i*4] / 255 - 0.5) / 0.5;
+      input[n + i] = (px[i*4+1] / 255 - 0.5) / 0.5;
+      input[2*n + i] = (px[i*4+2] / 255 - 0.5) / 0.5;
+    }
+    var feeds = {};
+    feeds[sess.inputNames[0]] = new window.ort.Tensor("float32", input, [1, 3, rh, rw]);
+    return sess.run(feeds).then(function(results){
+      return { matte: results[sess.outputNames[0]].data, rw: rw, rh: rh };
+    });
+  }).then(function(res){
+    if (!modnetPending || modnetPending.key !== key) { modnetPending = null; return; }
+    modnetPending = null;
+    var mc = document.createElement("canvas"); mc.width = res.rw; mc.height = res.rh;
+    var mctx = mc.getContext("2d");
+    var mid = mctx.createImageData(res.rw, res.rh), md = mid.data, i;
+    for (i = 0; i < res.matte.length; i++){
+      var v = Math.round(clamp01(res.matte[i]) * 255);
+      md[i*4] = md[i*4+1] = md[i*4+2] = v; md[i*4+3] = 255;
+    }
+    mctx.putImageData(mid, 0, 0);
+    // resample the matte back onto the processing frame
+    var full = document.createElement("canvas"); full.width = snapshot.width; full.height = snapshot.height;
+    var fctx = full.getContext("2d");
+    fctx.imageSmoothingEnabled = true; fctx.imageSmoothingQuality = "high";
+    fctx.drawImage(mc, 0, 0, full.width, full.height);
+    cleanPersonMask(full);
+    var sample = fctx.getImageData(0, 0, full.width, full.height).data, sum = 0, cnt = 0;
+    for (i = 0; i < sample.length; i += 4 * 97) { sum += sample[i]; cnt++; }
+    var cover = cnt ? (sum / cnt) / 255 : 0;
+    if (cover < 0.005 || cover > 0.995){
+      S.personMask = null; S.personKey = null;
+      setPersonStatus("none", "MODNetで人物が検出できませんでした。人物が大きく写った写真で試すか、「人物で抜く」または「色で抜く」に切り替えてください。");
+      requestRender(); return;
+    }
+    S.personMask = full; S.personKey = key;
+    S.personSerial = (S.personSerial || 0) + 1; S.refinedPerson = null;
+    setPersonStatus("ready", "MODNetで人物マットを推定しました（画像の約" + Math.round(cover * 100) + "%）。輪郭が食い込む／残る場合は「許容差」と「境界ぼかし」で、輪郭の外側に背景の縁が残る場合は「輪郭の収縮」で調整してください。");
+    requestRender();
+  }).catch(function(){
+    modnetPending = null;
+    if (S.personKey !== key){
+      setPersonStatus("error", "MODNetの読み込み／実行に失敗しました。通信環境を確認して「MODNetで切り抜きを実行」を押すか、「人物で抜く（人物を自動判定）」をお試しください。");
+    }
+    requestRender();
+  });
+}
+function ensurePersonMask(){
+  if (!S.src || !$("bgOn").checked) return;
+  var mode0 = $("bgMode").value;
+  if (mode0 !== "person" && mode0 !== "modnet") return;
+  if (mode0 === "modnet"){ ensureModnetMask(); return; }
+  var key = personKey();
+  if (!key) return;
+  if (S.personMask && S.personKey === key) return;
+  if (S.personStatus === "loading" && segPending && segPending.key === key) return;
+  if (!S.base) buildBase();
+  // Feed the model an UPSCALED copy of the frame: with small sources
+  // (a few hundred px) the returned mask is otherwise only as fine as
+  // the tiny input, and every edge defect is magnified ~8x on export.
+  // The model returns its mask at the input size, so a larger input
+  // yields a smoother, higher-resolution mask to refine from.
+  var segScale = clamp(1100 / Math.max(S.base.width, S.base.height), 1, 3);
+  var snapshot = document.createElement("canvas");
+  snapshot.width = Math.max(2, Math.round(S.base.width * segScale));
+  snapshot.height = Math.max(2, Math.round(S.base.height * segScale));
+  var snapCtx = snapshot.getContext("2d");
+  snapCtx.imageSmoothingEnabled = true; snapCtx.imageSmoothingQuality = "high";
+  snapCtx.drawImage(S.base, 0, 0, snapshot.width, snapshot.height);
+  setPersonStatus("loading", "人物を判定中です…（初回はモデルの読み込みで少し時間がかかります）");
+  requestRender();
+  loadSegScript().then(function(){
+    var seg = getSegInstance();
+    segPending = { key: key, canvas: snapshot };
+    return seg.send({ image: snapshot });
+  }).catch(function(){
+    segPending = null;
+    setPersonStatus("error", "人物判定モデルを読み込めませんでした。通信環境を確認して「人物の切り抜きを実行」を押すか、「色で抜く」をお試しください。");
+    requestRender();
+  });
+}
+$("bgPersonBtn").addEventListener("click", function(){
+  S.personMask = null; S.personKey = null; S.personStatus = "idle";
+  if (!$("bgOn").checked){ $("bgOn").checked = true; $("bgOn").dispatchEvent(new Event("change")); return; }
+  ensurePersonMask();
+});
+$("bgModnetBtn").addEventListener("click", function(){
+  S.personMask = null; S.personKey = null; S.personStatus = "idle";
+  if (!$("bgOn").checked){ $("bgOn").checked = true; $("bgOn").dispatchEvent(new Event("change")); return; }
+  ensurePersonMask();
+});
+
+/* ============================== background removal ============================== */
+$("bgOn").addEventListener("change", function(){
+  $("bgOpts").classList.toggle("on", this.checked);
+  if (this.checked) ensurePersonMask();
+  requestRender();
+});
+$("bgMode").addEventListener("change", function(){
+  $("bgColorRow").style.display = this.value === "color" ? "block" : "none";
+  $("bgPersonRow").style.display = this.value === "person" ? "block" : "none";
+  $("bgModnetRow").style.display = this.value === "modnet" ? "block" : "none";
+  if (this.value === "person" || this.value === "modnet") ensurePersonMask();
+  requestRender();
+});
+$("bgOut").addEventListener("change", requestRender);
+function setBgColor(r,g,b){
+  S.bgColor = {r:r,g:g,b:b};
+  var hex = "#" + [r,g,b].map(function(v){ return v.toString(16).padStart(2,"0"); }).join("").toUpperCase();
+  $("bgSwatch").style.background = hex; $("bgHex").textContent = hex;
+}
+setBgColor(255,255,255);
+$("bgPickBtn").addEventListener("click", function(){
+  S.picking = !S.picking;
+  this.setAttribute("aria-pressed", S.picking ? "true" : "false");
+  this.textContent = S.picking ? "プレビューをクリック…" : "画像をクリックして取得";
+  viewCanvas.classList.toggle("brush", S.picking || S.tool!=="none");
+});
+$("bgAutoBtn").addEventListener("click", function(){
+  if (!S.base) return;
+  var ctx = S.base.getContext("2d"), w = S.base.width, h = S.base.height, s = 14;
+  var pts = [[0,0],[w-s,0],[0,h-s],[w-s,h-s]], sum=[0,0,0], cnt=0, i, j, k;
+  for (k=0;k<pts.length;k++){
+    var d = ctx.getImageData(pts[k][0], pts[k][1], s, s).data;
+    for (i=0;i<d.length;i+=4){ sum[0]+=d[i]; sum[1]+=d[i+1]; sum[2]+=d[i+2]; cnt++; }
+  }
+  setBgColor(Math.round(sum[0]/cnt), Math.round(sum[1]/cnt), Math.round(sum[2]/cnt));
+  if (!$("bgOn").checked){ $("bgOn").checked = true; $("bgOn").dispatchEvent(new Event("change")); }
+  requestRender();
+});
+
+/* ============================== brush (dodge / burn) ============================== */
+function canvasPoint(e){
+  var r = viewCanvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / r.width * viewCanvas.width,
+           y: (e.clientY - r.top) / r.height * viewCanvas.height };
+}
+function pushUndo(){
+  S.maskUndo.push(new Float32Array(S.mask));
+  if (S.maskUndo.length > 12) S.maskUndo.shift();
+}
+function paintAt(pt){
+  var radius = parseFloat($("brushSize").value) * (S.workW / Math.max(320, viewCanvas.getBoundingClientRect().width)) * (S.workW/ (S.workW)) ;
+  radius = parseFloat($("brushSize").value) * (S.workW / 900); // brush size defined on ~900px-wide preview feel
+  radius = clamp(radius, 4, S.workW);
+  var str = parseFloat($("brushStr").value)/100;
+  var dir = S.tool === "dodge" ? 1 : (S.tool === "burn" ? -1 : 0);
+  var x0 = Math.max(0, Math.floor(pt.x-radius)), x1 = Math.min(S.workW-1, Math.ceil(pt.x+radius));
+  var y0 = Math.max(0, Math.floor(pt.y-radius)), y1 = Math.min(S.workH-1, Math.ceil(pt.y+radius));
+  for (var y=y0;y<=y1;y++) for (var x=x0;x<=x1;x++){
+    var dx = x-pt.x, dy = y-pt.y, d2 = (dx*dx+dy*dy)/(radius*radius);
+    if (d2 > 1) continue;
+    var fall = Math.cos(Math.sqrt(d2) * Math.PI/2); fall *= fall;
+    var idx = y*S.workW+x;
+    if (S.tool === "erase"){ S.mask[idx] += (0 - S.mask[idx]) * fall * 0.4; }
+    else S.mask[idx] = clamp(S.mask[idx] + dir * str * fall, -1, 1);
+  }
+}
+viewCanvas.addEventListener("pointerdown", function(e){
+  if (!S.src) return;
+  var pt = canvasPoint(e);
+  if (S.picking){
+    var bx = clamp(Math.round(pt.x),0,S.workW-1), by = clamp(Math.round(pt.y),0,S.workH-1);
+    var d = S.base.getContext("2d").getImageData(bx,by,1,1).data;
+    setBgColor(d[0],d[1],d[2]);
+    S.picking = false;
+    $("bgPickBtn").setAttribute("aria-pressed","false");
+    $("bgPickBtn").textContent = "画像をクリックして取得";
+    if (!$("bgOn").checked){ $("bgOn").checked = true; $("bgOn").dispatchEvent(new Event("change")); }
+    requestRender(); return;
+  }
+  if (S.tool === "none") return;
+  pushUndo();
+  S.painting = true; S.lastPt = pt;
+  viewCanvas.setPointerCapture(e.pointerId);
+  paintAt(pt); requestRender();
+  e.preventDefault();
+});
+viewCanvas.addEventListener("pointermove", function(e){
+  if (!S.painting || S.tool === "none") return;
+  var pt = canvasPoint(e);
+  // interpolate between last and current for smooth strokes
+  var dist = Math.hypot(pt.x - S.lastPt.x, pt.y - S.lastPt.y), steps = Math.max(1, Math.floor(dist/6)), i;
+  for (i=1;i<=steps;i++) paintAt({ x: S.lastPt.x + (pt.x-S.lastPt.x)*i/steps, y: S.lastPt.y + (pt.y-S.lastPt.y)*i/steps });
+  S.lastPt = pt;
+  requestRender();
+});
+["pointerup","pointercancel"].forEach(function(ev){ viewCanvas.addEventListener(ev, function(){ S.painting = false; }); });
+$("maskUndo").addEventListener("click", function(){
+  var prev = S.maskUndo.pop(); if (prev){ S.mask = prev; requestRender(); }
+});
+$("maskClear").addEventListener("click", function(){
+  if (!S.mask) return; pushUndo(); S.mask = new Float32Array(S.workW*S.workH); requestRender();
+});
+
+/* ============================== tone curve editor ============================== */
+var curveCv = $("curveCanvas"), cctx = curveCv.getContext("2d");
+var dragPt = -1;
+function drawCurve(){
+  var W = curveCv.width, H = curveCv.height, pad = 14;
+  var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  cctx.clearRect(0,0,W,H);
+  cctx.strokeStyle = dark ? "#3a3a3f" : "#d8d5cf"; cctx.lineWidth = 1;
+  var i;
+  for (i=1;i<4;i++){
+    cctx.beginPath(); cctx.moveTo(pad + (W-2*pad)*i/4, pad); cctx.lineTo(pad + (W-2*pad)*i/4, H-pad); cctx.stroke();
+    cctx.beginPath(); cctx.moveTo(pad, pad + (H-2*pad)*i/4); cctx.lineTo(W-pad, pad + (H-2*pad)*i/4); cctx.stroke();
+  }
+  cctx.strokeStyle = dark ? "#55534e" : "#b9b6b0";
+  cctx.beginPath(); cctx.moveTo(pad, H-pad); cctx.lineTo(W-pad, pad); cctx.stroke();
+  var lut = curveLUT();
+  cctx.strokeStyle = "#cf2b23"; cctx.lineWidth = 2.5; cctx.beginPath();
+  for (i=0;i<256;i++){
+    var px = pad + (W-2*pad)*i/255, py = pad + (H-2*pad)*(1 - lut[i]/255);
+    if (i===0) cctx.moveTo(px,py); else cctx.lineTo(px,py);
+  }
+  cctx.stroke();
+  cctx.fillStyle = dark ? "#f0efe9" : "#17171a";
+  for (i=0;i<5;i++){
+    var cx = pad + (W-2*pad)*i/4, cy = pad + (H-2*pad)*(1 - S.curve[i]/255);
+    cctx.beginPath(); cctx.arc(cx, cy, i===dragPt ? 8 : 6.5, 0, 7); cctx.fill();
+    cctx.fillStyle = "#cf2b23"; cctx.beginPath(); cctx.arc(cx, cy, 2.6, 0, 7); cctx.fill();
+    cctx.fillStyle = dark ? "#f0efe9" : "#17171a";
+  }
+}
+function curvePointFromEvent(e){
+  var r = curveCv.getBoundingClientRect(), pad = 14;
+  var fx = (e.clientX - r.left) / r.width * curveCv.width;
+  var fy = (e.clientY - r.top) / r.height * curveCv.height;
+  var best = -1, bd = 1e9, i;
+  for (i=0;i<5;i++){
+    var cx = pad + (curveCv.width-2*pad)*i/4;
+    var d = Math.abs(cx - fx); if (d < bd){ bd = d; best = i; }
+  }
+  return { idx: best, fy: fy };
+}
+curveCv.addEventListener("pointerdown", function(e){
+  var p = curvePointFromEvent(e); dragPt = p.idx;
+  curveCv.setPointerCapture(e.pointerId); moveCurve(e); e.preventDefault();
+});
+curveCv.addEventListener("pointermove", function(e){ if (dragPt >= 0) moveCurve(e); });
+["pointerup","pointercancel"].forEach(function(ev){ curveCv.addEventListener(ev, function(){ dragPt = -1; drawCurve(); }); });
+function moveCurve(e){
+  var r = curveCv.getBoundingClientRect(), pad = 14;
+  var fy = (e.clientY - r.top) / r.height * curveCv.height;
+  var v = 255 * (1 - (fy - pad) / (curveCv.height - 2*pad));
+  S.curve[dragPt] = clamp(Math.round(v), 0, 255);
+  if (dragPt === 0) S.curve[0] = clamp(S.curve[0], 0, 200);
+  if (dragPt === 4) S.curve[4] = clamp(S.curve[4], 55, 255);
+  drawCurve(); requestRender();
+}
+document.querySelectorAll("[data-curve]").forEach(function(b){
+  b.addEventListener("click", function(){
+    var k = b.getAttribute("data-curve");
+    if (k === "linear") S.curve = [0,64,128,192,255];
+    if (k === "s") S.curve = [0,44,128,212,255];
+    if (k === "hard") S.curve = [0,22,128,234,255];
+    if (k === "soft") S.curve = [18,84,128,172,238];
+    drawCurve(); requestRender();
+  });
+});
+
+/* ============================== export (PNG + dpi chunk) ============================== */
+var CRC_TABLE = null;
+function crc32(bytes){
+  if (!CRC_TABLE){
+    CRC_TABLE = new Int32Array(256);
+    for (var n=0;n<256;n++){ var c=n; for (var k=0;k<8;k++) c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); CRC_TABLE[n]=c; }
+  }
+  var crc = 0xFFFFFFFF;
+  for (var i=0;i<bytes.length;i++) crc = CRC_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc>>>8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function injectDpi(buf, dpi){
+  var src = new Uint8Array(buf);
+  var ppm = Math.round(dpi / 0.0254);
+  var chunk = new Uint8Array(21);
+  var dv = new DataView(chunk.buffer);
+  dv.setUint32(0, 9);
+  chunk[4]=0x70; chunk[5]=0x48; chunk[6]=0x59; chunk[7]=0x73; // pHYs
+  dv.setUint32(8, ppm); dv.setUint32(12, ppm); chunk[16]=1;
+  dv.setUint32(17, crc32(chunk.subarray(4,17)));
+  var out = new Uint8Array(src.length + 21);
+  out.set(src.subarray(0,33), 0);
+  out.set(chunk, 33);
+  out.set(src.subarray(33), 54);
+  return out;
+}
+function renderExport(w, h){
+  buildLUT();
+  var res = computeGray(w, h, true);
+  var c = document.createElement("canvas"); c.width=w; c.height=h;
+  var ctx = c.getContext("2d");
+  if (S.mode === "halftone"){
+    // halftone cell size is defined at export resolution: scale cell by (w / previewW) only when exporting preview size; for print export use as-is px at target dpi
+    renderHalftone(ctx, res.gray, res.alpha, w, h, w / Math.max(1, outputPx().w));
+  } else {
+    var bin = binarize(res.gray, w, h, res.keep);
+    paintBinary(ctx, bin, res.alpha, w, h);
+  }
+  return c;
+}
+function doExport(full){
+  if (!S.src) { $("exportInfo").textContent = "先に画像を読み込んでください。"; return; }
+  // Never export with a person mask captured for a different size/aspect:
+  // it would be stretched over this frame and cut the subject at the wrong
+  // place. Ask for a retry once the preview has re-segmented instead of
+  // silently writing a misaligned file.
+  if ($("bgOn").checked && ($("bgMode").value === "person" || $("bgMode").value === "modnet") && (!S.personMask || S.personKey !== personKey())){
+    $("exportInfo").textContent = "人物の切り抜きを現在のサイズで再計算中です。プレビューの人物表示が更新されてから、もう一度書き出してください。";
+    ensurePersonMask();
+    return;
+  }
+  var o = outputPx();
+  var w = full ? o.w : S.workW, h = full ? o.h : S.workH;
+  var btn = full ? $("exportBtn") : $("exportPrevBtn");
+  var old = btn.textContent; btn.disabled = true; btn.textContent = "書き出し中…（大きい画像は時間がかかります）";
+  setTimeout(function(){
+    try {
+      var c = renderExport(w, h);
+      c.toBlob(function(blob){
+        blob.arrayBuffer().then(function(buf){
+          var bytes = injectDpi(buf, full ? o.dpi : 96);
+          var url = URL.createObjectURL(new Blob([bytes], {type:"image/png"}));
+          var a = document.createElement("a");
+          a.href = url; a.download = S.srcName + "_" + S.mode + "_" + w + "x" + h + (full ? "_" + o.dpi + "dpi" : "") + ".png";
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+          btn.disabled = false; btn.textContent = old;
+          $("exportInfo").textContent = "書き出しました：" + w.toLocaleString() + " × " + h.toLocaleString() + " px" + (full ? "／" + o.dpi + " dpi情報を埋め込み済み" : "（プレビュー解像度）");
+        });
+      }, "image/png");
+    } catch(err){
+      btn.disabled = false; btn.textContent = old;
+      $("exportInfo").textContent = "書き出しに失敗しました（画像が大きすぎる可能性があります）。解像度を下げてお試しください。";
+    }
+  }, 30);
+}
+$("exportBtn").addEventListener("click", function(){ doExport(true); });
+$("exportPrevBtn").addEventListener("click", function(){ doExport(false); });
+
+/* ============================== init ============================== */
+drawCurve();
+updateOutInfo();
+if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function(){ drawCurve(); requestRender(); });
+</script>
+</body>
+</html>
