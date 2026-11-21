@@ -326,7 +326,7 @@
           <p class="hint">「許容差」で人物として残す強さ、「境界ぼかし」で輪郭のなじませ具合を調整できます。輪郭の外側に背景の明るい縁が残るときは「輪郭の収縮」を上げてください。ぼかし／収縮はどちらも<b>入稿サイズ基準のpx</b>で、書き出し時に拡大された後の解像度で効くので、実寸でも縁が甘くなりません。うまく抜けない場合は下の「色で抜く」も試せます。</p>
         </div>
         <div id="bgModnetRow" style="display:none">
-          <p class="hint" id="bgModnetStatus" style="margin-top:8px">人物専用のマッティングモデル MODNet（Apache-2.0／商用利用可）で、髪の毛先まで含めた人物のマット（抜きマスク）を推定します。背景削除をONにするか下のボタンを押すと実行します。初回だけ実行環境とモデル（合計 約17MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。</p>
+          <p class="hint" id="bgModnetStatus" style="margin-top:8px">人物専用のマッティングモデル MODNet（Apache-2.0／商用利用可）で、髪の毛先まで含めた人物のマット（抜きマスク）を推定します。背景削除をONにするか下のボタンを押すと実行します。初回だけ実行環境とモデル（合計 約17MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。推定は2段階で、全体を判定したあと人物の範囲だけを切り取って拡大し、指先などの細部を再推定します。</p>
           <div class="row" style="margin-top:8px">
             <button class="btn small" id="bgModnetBtn" type="button">MODNetで切り抜きを実行</button>
           </div>
@@ -509,7 +509,7 @@ function setSource(canvas, name){
   var ps = $("bgPersonStatus");
   if (ps) ps.textContent = "人物の切り抜きが標準です。背景削除をONにすると、画像から人物だけを自動で判定します。初回だけ判定用モデルの読み込みに少し時間がかかります。";
   var ms = $("bgModnetStatus");
-  if (ms) ms.textContent = "人物専用のマッティングモデル MODNet（Apache-2.0／商用利用可）で、髪の毛先まで含めた人物のマット（抜きマスク）を推定します。背景削除をONにするか下のボタンを押すと実行します。初回だけ実行環境とモデル（合計 約17MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。";
+  if (ms) ms.textContent = "人物専用のマッティングモデル MODNet（Apache-2.0／商用利用可）で、髪の毛先まで含めた人物のマット（抜きマスク）を推定します。背景削除をONにするか下のボタンを押すと実行します。初回だけ実行環境とモデル（合計 約17MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。推定は2段階で、全体を判定したあと人物の範囲だけを切り取って拡大し、指先などの細部を再推定します。";
   buildBase();
   $("srcInfo").textContent = name + " ／ " + S.srcW + " × " + S.srcH + " px";
   $("emptyState").style.display = "none";
@@ -1259,6 +1259,42 @@ function getModnetSession(){
   });
   return modnetModelPromise;
 }
+function modnetInfer(sess, sourceCanvas, shortEdge){
+  // MODNet preprocessor: shortest edge -> shortEdge, both sides multiples
+  // of 32, rescale 1/255, normalize with mean/std 0.5 (input name "input",
+  // output name "output", verified against the published ONNX graph).
+  var bw = sourceCanvas.width, bh = sourceCanvas.height;
+  var scale = shortEdge / Math.min(bw, bh);
+  var rw = Math.max(32, Math.round(bw * scale / 32) * 32);
+  var rh = Math.max(32, Math.round(bh * scale / 32) * 32);
+  var ic = document.createElement("canvas"); ic.width = rw; ic.height = rh;
+  var ictx = ic.getContext("2d");
+  ictx.imageSmoothingEnabled = true; ictx.imageSmoothingQuality = "high";
+  ictx.drawImage(sourceCanvas, 0, 0, rw, rh);
+  var px = ictx.getImageData(0, 0, rw, rh).data;
+  var n = rw * rh, input = new Float32Array(3 * n), i;
+  for (i = 0; i < n; i++){
+    input[i] = (px[i*4] / 255 - 0.5) / 0.5;
+    input[n + i] = (px[i*4+1] / 255 - 0.5) / 0.5;
+    input[2*n + i] = (px[i*4+2] / 255 - 0.5) / 0.5;
+  }
+  var feeds = {};
+  feeds[sess.inputNames[0]] = new window.ort.Tensor("float32", input, [1, 3, rh, rw]);
+  return sess.run(feeds).then(function(results){
+    return { matte: results[sess.outputNames[0]].data, rw: rw, rh: rh };
+  });
+}
+function modnetMatteCanvas(res){
+  var mc = document.createElement("canvas"); mc.width = res.rw; mc.height = res.rh;
+  var mctx = mc.getContext("2d");
+  var mid = mctx.createImageData(res.rw, res.rh), md = mid.data, i;
+  for (i = 0; i < res.matte.length; i++){
+    var v = Math.round(clamp01(res.matte[i]) * 255);
+    md[i*4] = md[i*4+1] = md[i*4+2] = v; md[i*4+3] = 255;
+  }
+  mctx.putImageData(mid, 0, 0);
+  return mc;
+}
 function ensureModnetMask(){
   var key = personKey();
   if (!key) return;
@@ -1267,50 +1303,70 @@ function ensureModnetMask(){
   if (!S.base) buildBase();
   var snapshot = S.base;
   modnetPending = { key: key };
-  setPersonStatus("loading", "MODNetで人物マットを推定中です…（初回は実行環境とモデルの読み込みで少し時間がかかります）");
+  setPersonStatus("loading", "MODNetで人物マットを推定中です…（初回は実行環境とモデルの読み込みで少し時間がかかります。全体の判定のあと、人物の範囲を切り取って指先などの細部を再推定するので、少し長めにかかります）");
   requestRender();
   getModnetSession().then(function(sess){
-    // MODNet preprocessor: shortest edge -> 512, both sides multiples of 32,
-    // rescale 1/255, normalize with mean/std 0.5 (input name "input",
-    // output name "output", verified against the published ONNX graph).
-    var bw = snapshot.width, bh = snapshot.height;
-    var scale = 512 / Math.min(bw, bh);
-    var rw = Math.max(32, Math.round(bw * scale / 32) * 32);
-    var rh = Math.max(32, Math.round(bh * scale / 32) * 32);
-    var ic = document.createElement("canvas"); ic.width = rw; ic.height = rh;
-    var ictx = ic.getContext("2d");
-    ictx.imageSmoothingEnabled = true; ictx.imageSmoothingQuality = "high";
-    ictx.drawImage(snapshot, 0, 0, rw, rh);
-    var px = ictx.getImageData(0, 0, rw, rh).data;
-    var n = rw * rh, input = new Float32Array(3 * n), i;
-    for (i = 0; i < n; i++){
-      input[i] = (px[i*4] / 255 - 0.5) / 0.5;
-      input[n + i] = (px[i*4+1] / 255 - 0.5) / 0.5;
-      input[2*n + i] = (px[i*4+2] / 255 - 0.5) / 0.5;
-    }
-    var feeds = {};
-    feeds[sess.inputNames[0]] = new window.ort.Tensor("float32", input, [1, 3, rh, rw]);
-    return sess.run(feeds).then(function(results){
-      return { matte: results[sess.outputNames[0]].data, rw: rw, rh: rh };
+    // Pass 1: whole frame at the model's native scale (shortest edge 512).
+    // On its own this starves fine structures: when the person occupies
+    // only part of the frame, a finger may be just a few input pixels
+    // wide and adjacent fingers merge into one blob in the matte.
+    return modnetInfer(sess, snapshot, 512).then(function(coarse){
+      if (!modnetPending || modnetPending.key !== key) return null;
+      // Person bounding box from the coarse matte, as frame fractions.
+      var minX = coarse.rw, minY = coarse.rh, maxX = -1, maxY = -1, x, y;
+      for (y = 0; y < coarse.rh; y += 2) for (x = 0; x < coarse.rw; x += 2){
+        if (coarse.matte[y * coarse.rw + x] > 0.35){
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+      if (maxX < 0) return { matteCanvas: modnetMatteCanvas(coarse) }; // no person: the coverage check below reports it
+      var fx0 = Math.max(0, minX / coarse.rw - 0.07), fy0 = Math.max(0, minY / coarse.rh - 0.07);
+      var fx1 = Math.min(1, maxX / coarse.rw + 0.07), fy1 = Math.min(1, maxY / coarse.rh + 0.07);
+      if ((fx1 - fx0) > 0.93 && (fy1 - fy0) > 0.93){
+        return { matteCanvas: modnetMatteCanvas(coarse) }; // person fills the frame; a crop would gain nothing
+      }
+      // Pass 2 (detail): re-render the fitted frame from the ORIGINAL at
+      // high resolution, crop just the person region, and run the model
+      // on the crop alone at a raised input scale (shortest edge 768).
+      // The 512px budget of pass 1 was spread over the whole frame, so
+      // a finger could be only ~4 input pixels wide; the crop spends
+      // the budget on the person and the higher scale multiplies it
+      // again, so thin structures (separated fingers, hair, cord ends)
+      // get several times more input pixels. The fine matte is
+      // composited over the coarse one at the crop position.
+      var o = outputPx();
+      var longEdge = Math.max(snapshot.width, snapshot.height);
+      var hrScale = clamp(2600 / longEdge, 1, 3);
+      var hrW = Math.max(2, Math.round(snapshot.width * hrScale));
+      var hrH = Math.max(2, Math.round(snapshot.height * hrScale));
+      var hr = document.createElement("canvas"); hr.width = hrW; hr.height = hrH;
+      var hrCtx = hr.getContext("2d");
+      hrCtx.fillStyle = "#ffffff"; hrCtx.fillRect(0, 0, hrW, hrH);
+      drawFitted(hrCtx, S.src, hrW, hrH, o.w / o.h);
+      var cx0 = Math.floor(fx0 * hrW), cy0 = Math.floor(fy0 * hrH);
+      var cw = Math.max(32, Math.ceil(fx1 * hrW) - cx0), ch = Math.max(32, Math.ceil(fy1 * hrH) - cy0);
+      var crop = document.createElement("canvas"); crop.width = cw; crop.height = ch;
+      crop.getContext("2d").drawImage(hr, cx0, cy0, cw, ch, 0, 0, cw, ch);
+      return modnetInfer(sess, crop, 768).then(function(fine){
+        var full = document.createElement("canvas"); full.width = hrW; full.height = hrH;
+        var fctx = full.getContext("2d");
+        fctx.imageSmoothingEnabled = true; fctx.imageSmoothingQuality = "high";
+        fctx.drawImage(modnetMatteCanvas(coarse), 0, 0, hrW, hrH);
+        fctx.drawImage(modnetMatteCanvas(fine), cx0, cy0, cw, ch);
+        return { matteCanvas: full };
+      });
     });
   }).then(function(res){
+    if (!res) return; // superseded by a newer request
     if (!modnetPending || modnetPending.key !== key) { modnetPending = null; return; }
     modnetPending = null;
-    var mc = document.createElement("canvas"); mc.width = res.rw; mc.height = res.rh;
-    var mctx = mc.getContext("2d");
-    var mid = mctx.createImageData(res.rw, res.rh), md = mid.data, i;
-    for (i = 0; i < res.matte.length; i++){
-      var v = Math.round(clamp01(res.matte[i]) * 255);
-      md[i*4] = md[i*4+1] = md[i*4+2] = v; md[i*4+3] = 255;
-    }
-    mctx.putImageData(mid, 0, 0);
-    // resample the matte back onto the processing frame
-    var full = document.createElement("canvas"); full.width = snapshot.width; full.height = snapshot.height;
-    var fctx = full.getContext("2d");
-    fctx.imageSmoothingEnabled = true; fctx.imageSmoothingQuality = "high";
-    fctx.drawImage(mc, 0, 0, full.width, full.height);
+    var full = res.matteCanvas;
     cleanPersonMask(full);
-    var sample = fctx.getImageData(0, 0, full.width, full.height).data, sum = 0, cnt = 0;
+    var fctx = full.getContext("2d");
+    var sample = fctx.getImageData(0, 0, full.width, full.height).data, sum = 0, cnt = 0, i;
     for (i = 0; i < sample.length; i += 4 * 97) { sum += sample[i]; cnt++; }
     var cover = cnt ? (sum / cnt) / 255 : 0;
     if (cover < 0.005 || cover > 0.995){
