@@ -330,7 +330,7 @@
           <div class="row" style="margin-top:8px">
             <button class="btn small" id="bgModnetBtn" type="button">MODNetで切り抜きを実行</button>
           </div>
-          <p class="hint">得られたマットには、上の「人物で抜く」と同じ輪郭整形（飛び地除去・エッジ吸着）と、「許容差」「境界ぼかし」「輪郭の収縮」がそのまま効きます。輪郭整形ではさらに、写真側にはっきりした縁がある場所（袖のような大きな平坦面の輪郭）ではマットの縁を写真の輪郭に合わせて締め直し、写真が平坦な場所（袖と体の隙間など）に残ったマットの斑は周囲の多数決で消すので、ディザで縁が点々に化けたり隙間にノイズが残ったりしにくくなっています。読み込みや実行に失敗した場合は、「人物で抜く（人物を自動判定）」に切り替えてください。</p>
+          <p class="hint">得られたマットには、上の「人物で抜く」と同じ輪郭整形（飛び地除去・エッジ吸着）と、「許容差」「境界ぼかし」「輪郭の収縮」がそのまま効きます。輪郭整形ではさらに、写真側にはっきりした縁がある場所（袖のような大きな平坦面の輪郭）ではマットの縁を写真の輪郭に合わせて締め直し、写真が平坦な場所（袖と体の隙間など）に残ったマットの斑は周囲の多数決で消すので、ディザで縁が点々に化けたり隙間にノイズが残ったりしにくくなっています。さらに最終の切り口では、グレーを白へなじませる帯を境界ぼかしの約1/3に圧縮しているので、ぼかしを入れても輪郭に沿った点々の帯が残りにくく、縁は硬く出ます（切り口の位置と透過の柔らかさは従来どおりです）。読み込みや実行に失敗した場合は、「人物で抜く（人物を自動判定）」に切り替えてください。</p>
         </div>
         <div id="bgColorRow" style="display:none">
           <label class="f">背景色 <span class="swatch" id="bgSwatch"></span> <span class="mono" id="bgHex">#FFFFFF</span></label>
@@ -766,6 +766,13 @@ function getRefinedPersonCanvas(w, h, imgCanvas){
     //    RGB distance so a saturated blue sleeve against a pale wall
     //    counts even where its luminance step is borderline. The cut
     //    then follows the photographed contour instead of the soft ramp.
+    // 3. Ramp compression: where the matte's own ramp is still wide (its
+    //    per-pixel gradient shallow) — typically a real but weak photo
+    //    edge that pass 2 could not fully engage, like the shadowed
+    //    inner contour of a hanging sleeve running down to the wrist —
+    //    squeeze the ramp toward a hard cut. Thin structures (hair
+    //    strands, cords, finger gaps) have steep matte gradients even
+    //    where they are soft, so they keep their profile untouched.
     var grad = new Float32Array(alpha.length);
     for (i = 0; i < alpha.length; i++){
       var og = i * 4, xg = i % rw, dR = 0, dD = 0;
@@ -799,15 +806,28 @@ function getRefinedPersonCanvas(w, h, imgCanvas){
     }
     for (i = 0; i < alpha.length; i++){
       if (alpha[i] <= 0.02 || alpha[i] >= 0.98) continue;
-      var s = clamp01((grad[i] - 0.025) * 5);
+      var s = clamp01((grad[i] - 0.018) * 5);
       if (s <= 0) continue;
-      var sharp = clamp01(0.5 + (alpha[i] - 0.5) * (1 + 1.7 * s));
-      alpha[i] = alpha[i] + (sharp - alpha[i]) * (0.4 + 0.6 * s);
-      if (grad[i] > 0.06){
-        var snap = clamp01((grad[i] - 0.06) * 4);
+      var sharp = clamp01(0.5 + (alpha[i] - 0.5) * (1 + 2.3 * s));
+      alpha[i] = alpha[i] + (sharp - alpha[i]) * (0.5 + 0.5 * s);
+      if (grad[i] > 0.045){
+        var snap = clamp01((grad[i] - 0.045) * 4);
         var tgt = alpha[i] >= 0.5 ? 1 : 0;
-        alpha[i] = alpha[i] + (tgt - alpha[i]) * snap * 0.6;
+        alpha[i] = alpha[i] + (tgt - alpha[i]) * snap * 0.7;
       }
+    }
+    var preA = new Float32Array(alpha); // snapshot for pass 3 gradient reads
+    for (i = 0; i < alpha.length; i++){
+      if (preA[i] <= 0.02 || preA[i] >= 0.98) continue;
+      var xm3 = i % rw, gm3 = 0;
+      if (xm3 + 1 < rw) gm3 = Math.max(gm3, Math.abs(preA[i] - preA[i+1]));
+      if (xm3 > 0) gm3 = Math.max(gm3, Math.abs(preA[i] - preA[i-1]));
+      if (i + rw < alpha.length) gm3 = Math.max(gm3, Math.abs(preA[i] - preA[i+rw]));
+      if (i - rw >= 0) gm3 = Math.max(gm3, Math.abs(preA[i] - preA[i-rw]));
+      var w3 = clamp01((0.16 - gm3) / 0.08);
+      if (w3 <= 0) continue;
+      var hard3 = clamp01(0.5 + (preA[i] - 0.5) * 1.75);
+      alpha[i] = preA[i] + (hard3 - preA[i]) * w3 * 0.9;
     }
   } catch(e) { /* matting is best-effort; steepened mask still applies */ }
   for (i = 0; i < alpha.length; i++){ var v = Math.round(alpha[i] * 255); dd[i*4] = dd[i*4+1] = dd[i*4+2] = v; dd[i*4+3] = 255; }
@@ -862,6 +882,7 @@ function computeGray(w, h, forExport){
     var a = 1;
     if (bgOn){
       var f = 0; // 1 = fully background
+      var fBlend = -1; // person modes set a harder variant for the grey blend only
       if ((bgMode === "person" || bgMode === "modnet") && personScaled){
         // Person probability 0..1 after refinement. The final cut is made
         // HERE, at the current resolution (full export size when writing):
@@ -883,6 +904,19 @@ function computeGray(w, h, forExport){
         f = clamp01((thrP + soft - pp) / (soft * 2));
         if (pp < thrP - soft) f = 1;
         if (pp > thrP + soft) f = 0;
+        // The grey-to-white blend gets a much narrower transition than
+        // the cut itself. Blending across the full feather width turns
+        // into a band of sparse dots along the contour once dithered,
+        // however clean the matte is — that band, not the matte, is
+        // what stays visible on a large flat contour like a sleeve.
+        // So the blend is compressed to about a third of the cut's
+        // softness (floored at ~0.8 output px), while keep / alpha keep
+        // the user's feather, so the transparent output retains its
+        // soft falloff and the cut position does not move.
+        var softB = Math.min(soft, Math.max(soft * 0.35, 0.8 * scaleE * gE));
+        fBlend = clamp01((thrP + softB - pp) / (softB * 2));
+        if (pp < thrP - softB) fBlend = 1;
+        if (pp > thrP + softB) fBlend = 0;
       } else if (bgMode === "color"){
         var dist = Math.sqrt((r-bc.r)*(r-bc.r)*0.30 + (gg-bc.g)*(gg-bc.g)*0.59 + (b-bc.b)*(b-bc.b)*0.11) * 1.8;
         f = clamp01((tol + feather - dist) / (feather*2));
@@ -893,7 +927,7 @@ function computeGray(w, h, forExport){
         if (lum > thr + feather) f = 1;
       }
       if (bgOut === "alpha"){ a = 1 - f; v = v + (1-v)*f*0; if (f>0.98) v = 1; }
-      else { v = v + (1 - v) * f; } // blend to white
+      else { v = v + (1 - v) * (fBlend >= 0 ? fBlend : f); } // blend to white
     }
     gray[p] = v; alpha[p] = a;
     // keep = how much of this pixel belongs to the subject (1 = subject).
