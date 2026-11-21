@@ -330,7 +330,7 @@
           <div class="row" style="margin-top:8px">
             <button class="btn small" id="bgModnetBtn" type="button">MODNetで切り抜きを実行</button>
           </div>
-          <p class="hint">得られたマットには、上の「人物で抜く」と同じ輪郭整形（飛び地除去・エッジ吸着）と、「許容差」「境界ぼかし」「輪郭の収縮」がそのまま効きます。読み込みや実行に失敗した場合は、「人物で抜く（人物を自動判定）」に切り替えてください。</p>
+          <p class="hint">得られたマットには、上の「人物で抜く」と同じ輪郭整形（飛び地除去・エッジ吸着）と、「許容差」「境界ぼかし」「輪郭の収縮」がそのまま効きます。輪郭整形ではさらに、写真側にはっきりした縁がある場所（袖のような大きな平坦面の輪郭）ではマットの縁を写真の輪郭に合わせて締め直し、写真が平坦な場所（袖と体の隙間など）に残ったマットの斑は周囲の多数決で消すので、ディザで縁が点々に化けたり隙間にノイズが残ったりしにくくなっています。読み込みや実行に失敗した場合は、「人物で抜く（人物を自動判定）」に切り替えてください。</p>
         </div>
         <div id="bgColorRow" style="display:none">
           <label class="f">背景色 <span class="swatch" id="bgSwatch"></span> <span class="mono" id="bgHex">#FFFFFF</span></label>
@@ -632,7 +632,10 @@ function buildLUT(){
       re-derive the uncertain boundary band from the picture itself —
       each band pixel is compared with blurred foreground / background
       colour fields sampled from the definite regions (simple matting),
-      which snaps the edge to the real colour transition of the photo.
+      which snaps the edge to the real colour transition of the photo;
+      the band is then cleaned where the photo is flat (matte speckle,
+      e.g. in the gap beside a sleeve) and steepened where the photo has
+      a real edge, so a sharp photographed contour cuts sharply.
    3. In computeGray, the final threshold is applied at the target size
       with feather/shrink expressed in output pixels and converted
       through the mask's local gradient, so the edge width in print
@@ -745,22 +748,65 @@ function getRefinedPersonCanvas(w, h, imgCanvas){
         alpha[i] = clamp01(0.5 + (ratio - 0.5) * 1.9);
       }
     }
-    // Snap the transition onto the photo's own edge: where the picture
-    // itself has a strong luminance step, pull band pixels decisively
-    // toward the side they are already on. The cut then follows the
-    // photographed contour (sharp on clear material like a black haori
-    // against a pale wall) instead of the model's soft ramp.
+    // ---- edge tightening, guided by the photo itself ----
+    // A hanging kimono sleeve is the hard case for a soft matte: a large
+    // flat surface whose photographed edge is perfectly sharp, while the
+    // model returns a wide, slightly noisy alpha ramp across it. Dither
+    // turns that ramp into a dotted, wobbling contour, and alpha speckle
+    // the ramp leaves in flat background — or in the narrow gap between
+    // sleeve and torso, where the colour fields above are unreliable —
+    // prints as stray dots and gap noise. Two guided passes fix the band:
+    // 1. Flat-area band cleanup: where the PHOTO is locally flat (no real
+    //    edge), a band pixel is judged against its neighbourhood and
+    //    pulled toward the neighbourhood's majority decision. Matte
+    //    speckle in flat areas averages away; real detail (fingers,
+    //    hair, cords) sits on strong photo gradients and is untouched.
+    // 2. Guided sharpening: where the photo has a real edge, steepen the
+    //    alpha ramp in proportion to that edge's strength, measured as
+    //    RGB distance so a saturated blue sleeve against a pale wall
+    //    counts even where its luminance step is borderline. The cut
+    //    then follows the photographed contour instead of the soft ramp.
+    var grad = new Float32Array(alpha.length);
+    for (i = 0; i < alpha.length; i++){
+      var og = i * 4, xg = i % rw, dR = 0, dD = 0;
+      if (xg + 1 < rw){
+        var dr = imgD[og]-imgD[og+4], dg = imgD[og+1]-imgD[og+5], db = imgD[og+2]-imgD[og+6];
+        dR = Math.sqrt(dr*dr + dg*dg + db*db) / 441.7;
+      }
+      if (i + rw < alpha.length){
+        var er = imgD[og]-imgD[og+rw*4], eg = imgD[og+1]-imgD[og+rw*4+1], eb = imgD[og+2]-imgD[og+rw*4+2];
+        dD = Math.sqrt(er*er + eg*eg + eb*eb) / 441.7;
+      }
+      grad[i] = Math.max(dR, dD);
+    }
+    var srcA = new Float32Array(alpha); // snapshot: neighbourhood reads must not see updated values
+    for (i = 0; i < alpha.length; i++){
+      if (srcA[i] <= 0.02 || srcA[i] >= 0.98) continue;
+      if (grad[i] >= 0.035) continue; // a real photo edge lives here; pass 2 handles it
+      var xi = i % rw, yi = (i - xi) / rw, sum = 0, cnt = 0, gMax = 0, xx2, yy2;
+      for (yy2 = Math.max(0, yi-2); yy2 <= Math.min(rh-1, yi+2); yy2++)
+        for (xx2 = Math.max(0, xi-2); xx2 <= Math.min(rw-1, xi+2); xx2++){
+          sum += srcA[yy2*rw+xx2]; cnt++;
+          if (grad[yy2*rw+xx2] > gMax) gMax = grad[yy2*rw+xx2];
+        }
+      // A strong photo edge within the window means a thin real structure
+      // (cord, hair strand, finger gap) may run through here even though
+      // this pixel itself is flat — leave it to pass 2 rather than voting
+      // it away as speckle.
+      if (gMax > 0.09) continue;
+      var majority = clamp01(0.5 + (sum / cnt - 0.5) * 2.4);
+      alpha[i] = srcA[i] + (majority - srcA[i]) * 0.8;
+    }
     for (i = 0; i < alpha.length; i++){
       if (alpha[i] <= 0.02 || alpha[i] >= 0.98) continue;
-      var o2 = i * 4, xx = i % rw;
-      var lumC = 0.2126*imgD[o2] + 0.7152*imgD[o2+1] + 0.0722*imgD[o2+2];
-      var lumR = xx + 1 < rw ? 0.2126*imgD[o2+4] + 0.7152*imgD[o2+5] + 0.0722*imgD[o2+6] : lumC;
-      var lumD = i + rw < alpha.length ? 0.2126*imgD[o2+rw*4] + 0.7152*imgD[o2+rw*4+1] + 0.0722*imgD[o2+rw*4+2] : lumC;
-      var gImg = Math.max(Math.abs(lumR - lumC), Math.abs(lumD - lumC)) / 255;
-      if (gImg > 0.06){
-        var snap = clamp01((gImg - 0.06) * 4);
+      var s = clamp01((grad[i] - 0.025) * 5);
+      if (s <= 0) continue;
+      var sharp = clamp01(0.5 + (alpha[i] - 0.5) * (1 + 1.7 * s));
+      alpha[i] = alpha[i] + (sharp - alpha[i]) * (0.4 + 0.6 * s);
+      if (grad[i] > 0.06){
+        var snap = clamp01((grad[i] - 0.06) * 4);
         var tgt = alpha[i] >= 0.5 ? 1 : 0;
-        alpha[i] = alpha[i] + (tgt - alpha[i]) * snap * 0.85;
+        alpha[i] = alpha[i] + (tgt - alpha[i]) * snap * 0.6;
       }
     }
   } catch(e) { /* matting is best-effort; steepened mask still applies */ }
