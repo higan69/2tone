@@ -1368,11 +1368,24 @@ function runMediaPipeMask(key){
         var stale = segPending; segPending = null;
         try { stale.onFail(new Error("superseded")); } catch(e) {}
       }
-      segPending = { key: key, canvas: snapshot,
-        onDone: function(mc, cover){ resolve({ canvas: mc, cover: cover }); },
-        onFail: function(err){ reject(err || new Error("segmentation failed")); } };
+      // A dropped result (the solution never calls back) must not hang
+      // the caller forever either: fail the run after a generous
+      // timeout so the caller can retry on a fresh instance.
+      var pend = { key: key, canvas: snapshot,
+        onDone: function(mc, cover){ if (pend.timer) clearTimeout(pend.timer); resolve({ canvas: mc, cover: cover }); },
+        onFail: function(err){ if (pend.timer) clearTimeout(pend.timer); reject(err || new Error("segmentation failed")); } };
+      pend.timer = setTimeout(function(){
+        if (segPending === pend){ segPending = null; pend.onFail(new Error("segmentation timeout")); }
+      }, 45000);
+      segPending = pend;
       return seg.send({ image: snapshot });
-    }).catch(function(err){ reject(err); });
+    }).catch(function(err){
+      if (segPending && segPending.key === key){
+        var p2 = segPending; segPending = null;
+        if (p2.timer) clearTimeout(p2.timer);
+      }
+      reject(err);
+    });
   });
 }
 /* ================= MODNet portrait matting (ONNX Runtime Web) =================
@@ -1591,8 +1604,45 @@ function ensureModnetMask(){
    there — a flat MODNet matte across the band, which is exactly what a
    misjudged sleeve interior looks like, contributes nothing. If one
    model fails outright, the other still cuts alone, with a status note
-   saying so. */
+   saying so.
+   The two models run SEQUENTIALLY (MediaPipe first, MODNet second),
+   never in parallel: both are WASM runtimes (the MediaPipe solution
+   and ONNX Runtime Web), and starting / running them at the same time
+   made the MediaPipe run fail in hybrid mode only — the identical run
+   succeeds in "person" mode, and the coverage rule below is exactly
+   the person mode's (0.5%..99.5%), no stricter. Loading ORT for a
+   previous MODNet run can also leave an already-built MediaPipe
+   instance unable to deliver a result, so a failed MediaPipe attempt
+   is retried once on a freshly built instance before the hybrid gives
+   up on it and falls back to MODNet alone. */
 var hybridPending = null;
+/* One MediaPipe attempt for the hybrid, with the person mode's own
+   coverage rule. Resolves true only when a usable mask was stored in
+   S.mpMask. A "superseded" failure is reported via the flag instead of
+   being retried: another run owns the solution then. */
+function hybridMediaPipeAttempt(key, state){
+  return runMediaPipeMask(key).then(function(res){
+    if (res.cover < 0.005 || res.cover > 0.995) return false;
+    S.mpMask = res.canvas; S.mpKey = key;
+    return true;
+  }, function(err){
+    if (err && err.message === "superseded") state.superseded = true;
+    return false;
+  });
+}
+function runHybridMediaPipe(key){
+  if (S.mpMask && S.mpKey === key) return Promise.resolve(true);
+  var state = { superseded: false };
+  return hybridMediaPipeAttempt(key, state).then(function(ok){
+    if (ok || state.superseded) return ok;
+    // Retry once on a fresh segmentation instance: an instance that
+    // was built before / while the ONNX runtime loaded may never call
+    // back (or keep erroring); rebuilding re-initialises its WASM in
+    // the current page state.
+    segPending = null; segInstance = null;
+    return hybridMediaPipeAttempt(key, state);
+  });
+}
 function ensureHybridMask(){
   var key = personKey();
   if (!key) return;
@@ -1601,35 +1651,24 @@ function ensureHybridMask(){
   if (S.hybridFailKey === key && (S.personStatus === "error" || S.personStatus === "none")) return;
   if (!S.base) buildBase();
   hybridPending = { key: key };
-  setPersonStatus("loading", "併用で判定中です…（人物判定で領域を確定し、MODNetで縁を引き直します。初回は両方のモデルの読み込みで少し時間がかかります。全体の判定のあと、人物の範囲を切り取って指先などの細部を再推定するので、少し長めにかかります）");
+  setPersonStatus("loading", "併用で判定中です…（人物判定で領域を確定してから、MODNetで縁を引き直します。初回は両方のモデルの読み込みで少し時間がかかります。全体の判定のあと、人物の範囲を切り取って指先などの細部を再推定するので、少し長めにかかります）");
   requestRender();
-  var jobs = [];
-  if (S.mpMask && S.mpKey === key){
-    jobs.push(Promise.resolve(true));
-  } else {
-    jobs.push(runMediaPipeMask(key).then(function(res){
-      if (res.cover < 0.005 || res.cover > 0.995) return false;
-      S.mpMask = res.canvas; S.mpKey = key;
-      return true;
-    }).catch(function(){ return false; }));
-  }
-  if (S.mnMask && S.mnKey === key){
-    jobs.push(Promise.resolve(true));
-  } else {
-    jobs.push(runModnetMatte(S.base, function(){ return !hybridPending || hybridPending.key !== key; }).then(function(full){
+  runHybridMediaPipe(key).then(function(){
+    if (!hybridPending || hybridPending.key !== key) return null;
+    if (S.mnMask && S.mnKey === key) return true;
+    return runModnetMatte(S.base, function(){ return !hybridPending || hybridPending.key !== key; }).then(function(full){
       if (!full) return false;
       var cover = maskCoverage(full);
       if (cover < 0.005 || cover > 0.995) return false;
       S.mnMask = full; S.mnKey = key;
       return true;
-    }).catch(function(){ return false; }));
-  }
-  Promise.all(jobs).then(function(ok){
+    }).catch(function(){ return false; });
+  }).then(function(mnResult){
     if (!hybridPending || hybridPending.key !== key) return;
     hybridPending = null;
     if (personKey() !== key){ requestRender(); return; } // mode/geometry moved on; a fresh ensure will run
-    var mpOk = ok[0] && S.mpMask && S.mpKey === key;
-    var mnOk = ok[1] && S.mnMask && S.mnKey === key;
+    var mpOk = !!(S.mpMask && S.mpKey === key);
+    var mnOk = !!(mnResult && S.mnMask && S.mnKey === key);
     if (mpOk){
       S.personMask = S.mpMask;
       S.edgeMask = mnOk ? S.mnMask : null;
@@ -1651,7 +1690,7 @@ function ensureHybridMask(){
       S.edgeSerial = (S.edgeSerial || 0) + 1;
       S.refinedPerson = null;
       S.hybridFailKey = null;
-      setPersonStatus("ready", "人物判定に失敗したため、MODNetだけで切り抜きました（縁はシャープですが、袖のような大きな面の領域が崩れることがあります）。その場合は「人物で抜く」をお試しください。");
+      setPersonStatus("ready", "人物判定に失敗したため（作り直した判定でも回復しませんでした）、MODNetだけで切り抜きました（縁はシャープですが、袖のような大きな面の領域が崩れることがあります）。その場合は「人物で抜く」をお試しください。");
     } else {
       S.personMask = null; S.personKey = null; S.edgeMask = null;
       S.hybridFailKey = key;
