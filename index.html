@@ -315,6 +315,7 @@
         <select id="bgMode">
           <option value="person" selected>人物で抜く（人物を自動判定）</option>
           <option value="modnet">MODNetで抜く（人物マッティング・高精度）</option>
+          <option value="hybrid">併用で抜く（領域は人物判定・縁はMODNet）</option>
           <option value="color">色で抜く（背景色との近さ）</option>
           <option value="bright">明るい背景を抜く（白背景向き）</option>
         </select>
@@ -332,6 +333,13 @@
           </div>
           <p class="hint">得られたマットには、上の「人物で抜く」と同じ輪郭整形（飛び地除去・エッジ吸着）と、「許容差」「境界ぼかし」「輪郭の収縮」がそのまま効きます。輪郭整形ではさらに、写真側にはっきりした縁がある場所（袖のような大きな平坦面の輪郭）ではマットの縁を写真の輪郭に合わせて締め直し、写真が平坦な場所（袖と体の隙間など）に残ったマットの斑は周囲の多数決で消すので、ディザで縁が点々に化けたり隙間にノイズが残ったりしにくくなっています。さらに最終の切り口では、グレーを白へなじませる帯を境界ぼかしの約1/3に圧縮しているので、ぼかしを入れても輪郭に沿った点々の帯が残りにくく、縁は硬く出ます（切り口の位置と透過の柔らかさは従来どおりです）。読み込みや実行に失敗した場合は、「人物で抜く（人物を自動判定）」に切り替えてください。</p>
         </div>
+        <div id="bgHybridRow" style="display:none">
+          <p class="hint" id="bgHybridStatus" style="margin-top:8px">「人物で抜く」と「MODNetで抜く」の併用です。領域（どこまでが人物か）は人物判定のマスクで確定し、その境界の帯の中だけで、縁の位置とシャープさをMODNetのマットと写真の縁で引き直します。袖のように大きな面の形は人物判定どおりに保たれ、縁はMODNet並みに硬く出ます。背景削除をONにするか下のボタンを押すと実行します。初回は両方のモデル（合計 約24MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。</p>
+          <div class="row" style="margin-top:8px">
+            <button class="btn small" id="bgHybridBtn" type="button">併用で切り抜きを実行</button>
+          </div>
+          <p class="hint">得られたマットには、他の抜き方と同じ輪郭整形（飛び地除去・エッジ吸着）と、「許容差」「境界ぼかし」「輪郭の収縮」がそのまま効きます。MODNetが袖の内側のように領域の内側で大きく食い違う場所は境界の帯の外なのでMODNetは効かず、人物判定の領域がそのまま残ります。帯の中でも、MODNetのマットが平らな場所（MODNet自身が縁を見つけていない場所）では引き直しは働きません。どちらか一方の読み込みや実行に失敗した場合は、成功した方だけで切り抜きます。</p>
+        </div>
         <div id="bgColorRow" style="display:none">
           <label class="f">背景色 <span class="swatch" id="bgSwatch"></span> <span class="mono" id="bgHex">#FFFFFF</span></label>
           <div class="row">
@@ -347,7 +355,7 @@
           <option value="white" selected>白にする（印刷の地）</option>
           <option value="alpha">透明にする（PNG透過）</option>
         </select>
-        <p class="hint">人物写真は「人物で抜く」か「MODNetで抜く」が確実です。背景の色がグラデーションになっていたり、壁に影が落ちていたりしても、色ではなく人物そのものを判定するので抜け残りにくくなります。MODNetは人物専用モデルで輪郭の出方が違うので、同じ写真で両方を比べて選べます。</p>
+        <p class="hint">人物写真は「人物で抜く」「MODNetで抜く」「併用で抜く」が確実です。背景の色がグラデーションになっていたり、壁に影が落ちていたりしても、色ではなく人物そのものを判定するので抜け残りにくくなります。人物判定は袖のような大きな面の領域が安定する代わりに縁が柔らかく、MODNetは縁が硬い代わりに面を取り違えることがあります。「併用」は領域を人物判定、縁をMODNetで引き直す組み合わせです。同じ写真で比べて選べます。</p>
       </div>
     </section>
 
@@ -417,6 +425,11 @@ var S = {
   personStatus: "idle",   // idle|loading|ready|error|none
   personSerial: 0,        // bumped every time a new mask is stored
   refinedPerson: null,    // cached edge-refined mask canvas {key, canvas}
+  mpMask: null, mpKey: null,   // hybrid: MediaPipe mask (region authority)
+  mnMask: null, mnKey: null,   // hybrid: MODNet matte (edge source)
+  edgeMask: null,              // hybrid: MODNet canvas the refinement may consult
+  edgeSerial: 0,               // bumped every time edgeMask is (re)stored
+  hybridFailKey: null,         // hybrid: key whose last combined run failed outright
   painting: false,
   lastPt: null,
   zoom: 1, zoomFit: true
@@ -497,6 +510,8 @@ function syncWorkSize(){
   S.workW = d.w; S.workH = d.h;
   // the person mask was captured on the old frame: force re-segmentation
   S.personMask = null; S.personKey = null; S.refinedPerson = null;
+  S.mpMask = null; S.mpKey = null; S.mnMask = null; S.mnKey = null;
+  S.edgeMask = null; S.hybridFailKey = null;
   if (S.personStatus !== "loading") S.personStatus = "idle";
 }
 function setSource(canvas, name){
@@ -506,6 +521,10 @@ function setSource(canvas, name){
   S.mask = new Float32Array(S.workW*S.workH);
   S.maskUndo = [];
   S.personMask = null; S.personKey = null; S.personStatus = "idle"; S.refinedPerson = null;
+  S.mpMask = null; S.mpKey = null; S.mnMask = null; S.mnKey = null;
+  S.edgeMask = null; S.hybridFailKey = null;
+  var hs = $("bgHybridStatus");
+  if (hs) hs.textContent = "「人物で抜く」と「MODNetで抜く」の併用です。領域（どこまでが人物か）は人物判定のマスクで確定し、その境界の帯の中だけで、縁の位置とシャープさをMODNetのマットと写真の縁で引き直します。袖のように大きな面の形は人物判定どおりに保たれ、縁はMODNet並みに硬く出ます。背景削除をONにするか下のボタンを押すと実行します。初回は両方のモデル（合計 約24MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。";
   var ps = $("bgPersonStatus");
   if (ps) ps.textContent = "人物の切り抜きが標準です。背景削除をONにすると、画像から人物だけを自動で判定します。初回だけ判定用モデルの読み込みに少し時間がかかります。";
   var ms = $("bgModnetStatus");
@@ -635,7 +654,11 @@ function buildLUT(){
       which snaps the edge to the real colour transition of the photo;
       the band is then cleaned where the photo is flat (matte speckle,
       e.g. in the gap beside a sleeve) and steepened where the photo has
-      a real edge, so a sharp photographed contour cuts sharply.
+      a real edge, so a sharp photographed contour cuts sharply. In
+      hybrid mode the band is first redrawn from the MODNet matte —
+      but only where MODNet's own matte is steep there, so its area
+      mistakes (a sleeve interior read as background) cannot move the
+      MediaPipe region; see the hybrid pass inside.
    3. In computeGray, the final threshold is applied at the target size
       with feather/shrink expressed in output pixels and converted
       through the mask's local gradient, so the edge width in print
@@ -718,7 +741,7 @@ function buildColorField(imgC, alpha, w, h, wantFg, rad){
 }
 function getRefinedPersonCanvas(w, h, imgCanvas){
   if (!S.personMask) return null;
-  var key = [S.srcName, S.srcW, S.srcH, S.personSerial || 0, w, h].join("|");
+  var key = [S.srcName, S.srcW, S.srcH, S.personSerial || 0, S.edgeSerial || 0, w, h].join("|");
   if (S.refinedPerson && S.refinedPerson.key === key) return S.refinedPerson.canvas;
   var scale = Math.min(1, 2200 / Math.max(w, h));
   var rw = Math.max(2, Math.round(w * scale)), rh = Math.max(2, Math.round(h * scale));
@@ -730,6 +753,24 @@ function getRefinedPersonCanvas(w, h, imgCanvas){
   var alpha = new Float32Array(rw * rh), i;
   // steepen the model's soft probabilities before matting
   for (i = 0; i < alpha.length; i++) alpha[i] = clamp01((dd[i*4] / 255 - 0.5) * 1.3 + 0.5);
+  // Hybrid mode: S.personMask holds the MediaPipe mask (the region
+  // authority) and S.edgeMask the MODNet matte. Snapshot the MediaPipe
+  // alpha BEFORE the photo matting below rewrites the band — band
+  // membership for the hybrid redraw is judged on MediaPipe's own
+  // uncertainty — and sample the MODNet matte at this same size.
+  var baseA = new Float32Array(alpha);
+  var mnA = null;
+  if ($("bgMode") && $("bgMode").value === "hybrid" && S.edgeMask){
+    try {
+      var ec = document.createElement("canvas"); ec.width = rw; ec.height = rh;
+      var ectx = ec.getContext("2d");
+      ectx.imageSmoothingEnabled = true; ectx.imageSmoothingQuality = "high";
+      ectx.drawImage(S.edgeMask, 0, 0, rw, rh);
+      var ed = ectx.getImageData(0, 0, rw, rh).data;
+      mnA = new Float32Array(rw * rh);
+      for (i = 0; i < mnA.length; i++) mnA[i] = ed[i*4] / 255;
+    } catch(e) { mnA = null; }
+  }
   try {
     var ic = document.createElement("canvas"); ic.width = rw; ic.height = rh;
     var ictx = ic.getContext("2d"); ictx.drawImage(imgCanvas, 0, 0, rw, rh);
@@ -746,6 +787,37 @@ function getRefinedPersonCanvas(w, h, imgCanvas){
         var dB = (imgD[o]-bgF[o])*(imgD[o]-bgF[o]) + (imgD[o+1]-bgF[o+1])*(imgD[o+1]-bgF[o+1]) + (imgD[o+2]-bgF[o+2])*(imgD[o+2]-bgF[o+2]);
         var ratio = dB / (dF + dB + 0.01);
         alpha[i] = clamp01(0.5 + (ratio - 0.5) * 1.9);
+      }
+    }
+    // ---- hybrid edge redraw (MediaPipe region, MODNet edge) ----
+    // Only in hybrid mode, and only inside MediaPipe's own boundary
+    // band (baseA between 0.03 and 0.97): reposition the cut onto
+    // MODNet's matte. Two guards keep MODNet's known failure — reading
+    // a whole area, like the inside of a hanging sleeve, as background
+    // — from dragging the result:
+    // 1. Outside the band MODNet is never consulted, so the region
+    //    (which pixels are person at all) is MediaPipe's alone.
+    // 2. Inside the band, MODNet only speaks where its OWN matte has a
+    //    steep local ramp (gmn), i.e. where MODNet itself found an
+    //    edge. Across a misjudged sleeve interior the MODNet matte is
+    //    flat ~0 right through the band, its gradient is ~0, the
+    //    weight collapses and MediaPipe's profile stands. Where
+    //    MODNet genuinely tracks the contour, its ramp is far steeper
+    //    than MediaPipe's soft one, so the weight saturates and the
+    //    cut moves onto MODNet's crossing, steepened further. The
+    //    photo-guided passes below then finish the edge as usual.
+    if (mnA){
+      for (i = 0; i < alpha.length; i++){
+        if (baseA[i] <= 0.03 || baseA[i] >= 0.97) continue;
+        var xh = i % rw, gmn = 0;
+        if (xh + 1 < rw) gmn = Math.max(gmn, Math.abs(mnA[i] - mnA[i+1]));
+        if (xh > 0) gmn = Math.max(gmn, Math.abs(mnA[i] - mnA[i-1]));
+        if (i + rw < alpha.length) gmn = Math.max(gmn, Math.abs(mnA[i] - mnA[i+rw]));
+        if (i - rw >= 0) gmn = Math.max(gmn, Math.abs(mnA[i] - mnA[i-rw]));
+        var wgtH = clamp01((gmn - 0.03) / 0.10);
+        if (wgtH <= 0) continue;
+        var tgtH = clamp01(0.5 + (mnA[i] - 0.5) * 1.7);
+        alpha[i] = alpha[i] + (tgtH - alpha[i]) * wgtH * 0.85;
       }
     }
     // ---- edge tightening, guided by the photo itself ----
@@ -866,7 +938,7 @@ function computeGray(w, h, forExport){
 
   // person-segmentation mask resampled to this size (R channel: 255 = person)
   var personScaled = null;
-  if (bgOn && (bgMode === "person" || bgMode === "modnet") && S.personMask){
+  if (bgOn && (bgMode === "person" || bgMode === "modnet" || bgMode === "hybrid") && S.personMask){
     var pc = document.createElement("canvas"); pc.width = w; pc.height = h;
     var pctx = pc.getContext("2d");
     pctx.imageSmoothingEnabled = true; pctx.imageSmoothingQuality = "high";
@@ -883,7 +955,7 @@ function computeGray(w, h, forExport){
     if (bgOn){
       var f = 0; // 1 = fully background
       var fBlend = -1; // person modes set a harder variant for the grey blend only
-      if ((bgMode === "person" || bgMode === "modnet") && personScaled){
+      if ((bgMode === "person" || bgMode === "modnet" || bgMode === "hybrid") && personScaled){
         // Person probability 0..1 after refinement. The final cut is made
         // HERE, at the current resolution (full export size when writing):
         // feather and shrink are given in output (print) pixels and are
@@ -1208,10 +1280,12 @@ function personKey(){
 }
 function setPersonStatus(st, msg){
   S.personStatus = st;
-  var isMod = $("bgMode") && $("bgMode").value === "modnet";
-  var el = $(isMod ? "bgModnetStatus" : "bgPersonStatus");
+  var mode = $("bgMode") ? $("bgMode").value : "person";
+  var sid = mode === "modnet" ? "bgModnetStatus" : mode === "hybrid" ? "bgHybridStatus" : "bgPersonStatus";
+  var bid = mode === "modnet" ? "bgModnetBtn" : mode === "hybrid" ? "bgHybridBtn" : "bgPersonBtn";
+  var el = $(sid);
   if (el && msg) el.textContent = msg;
-  var btn = $(isMod ? "bgModnetBtn" : "bgPersonBtn");
+  var btn = $(bid);
   if (btn) btn.disabled = (st === "loading");
 }
 function loadSegScript(){
@@ -1255,26 +1329,51 @@ function getSegInstance(){
       var mctx = mc.getContext("2d");
       mctx.drawImage(results.segmentationMask, 0, 0, w, h);
       cleanPersonMask(mc);
-      // coverage check: an all-background / all-person mask means no person found
+      // coverage: an all-background / all-person mask means no person
+      // found; the CALLER decides what that means for its mode (the
+      // person mode reports it, the hybrid mode falls back to MODNet).
       var sample = mctx.getImageData(0, 0, w, h).data, sum = 0, cnt = 0, i;
       for (i = 0; i < sample.length; i += 4 * 97) { sum += sample[i]; cnt++; }
       var cover = cnt ? (sum / cnt) / 255 : 0;
-      if (cover < 0.005 || cover > 0.995){
-        S.personMask = null; S.personKey = null;
-        setPersonStatus("none", "人物が検出できませんでした。人物が大きく写った写真で試すか、「色で抜く」に切り替えてください。");
-        requestRender(); return;
-      }
-      S.personMask = mc; S.personKey = pending.key;
-      S.personSerial = (S.personSerial || 0) + 1; S.refinedPerson = null;
-      setPersonStatus("ready", "人物を検出しました（画像の約" + Math.round(cover * 100) + "%）。輪郭が食い込む／残る場合は「許容差」と「境界ぼかし」で、輪郭の外側に背景の縁が残る場合は「輪郭の収縮」で調整してください。");
-      requestRender();
+      if (pending.onDone) pending.onDone(mc, cover);
     } catch(err){
-      S.personMask = null; S.personKey = null;
-      setPersonStatus("error", "人物の判定に失敗しました。通信環境を確認して再実行するか、「色で抜く」をお試しください。");
-      requestRender();
+      if (pending.onFail) pending.onFail(err);
     }
   });
   return segInstance;
+}
+/* Run MediaPipe once and resolve with {canvas, cover}: the cleaned mask
+   plus its person coverage. Shared by the "person" mode and by the
+   hybrid mode (which also needs the MODNet matte before it can store
+   anything). The model is fed an UPSCALED copy of the frame: with small
+   sources (a few hundred px) the returned mask is otherwise only as
+   fine as the tiny input, and every edge defect is magnified ~8x on
+   export; a larger input yields a smoother, higher-resolution mask to
+   refine from. */
+function runMediaPipeMask(key){
+  return new Promise(function(resolve, reject){
+    if (!S.base) buildBase();
+    var segScale = clamp(1100 / Math.max(S.base.width, S.base.height), 1, 3);
+    var snapshot = document.createElement("canvas");
+    snapshot.width = Math.max(2, Math.round(S.base.width * segScale));
+    snapshot.height = Math.max(2, Math.round(S.base.height * segScale));
+    var snapCtx = snapshot.getContext("2d");
+    snapCtx.imageSmoothingEnabled = true; snapCtx.imageSmoothingQuality = "high";
+    snapCtx.drawImage(S.base, 0, 0, snapshot.width, snapshot.height);
+    loadSegScript().then(function(){
+      var seg = getSegInstance();
+      // a superseded run must not hang forever: fail it so its caller's
+      // staleness checks can settle
+      if (segPending && segPending.onFail){
+        var stale = segPending; segPending = null;
+        try { stale.onFail(new Error("superseded")); } catch(e) {}
+      }
+      segPending = { key: key, canvas: snapshot,
+        onDone: function(mc, cover){ resolve({ canvas: mc, cover: cover }); },
+        onFail: function(err){ reject(err || new Error("segmentation failed")); } };
+      return seg.send({ image: snapshot });
+    }).catch(function(err){ reject(err); });
+  });
 }
 /* ================= MODNet portrait matting (ONNX Runtime Web) =================
    MODNet (Apache-2.0, commercial use OK) is a portrait-matting model: it
@@ -1375,23 +1474,25 @@ function modnetMatteCanvas(res){
   mctx.putImageData(mid, 0, 0);
   return mc;
 }
-function ensureModnetMask(){
-  var key = personKey();
-  if (!key) return;
-  if (S.personMask && S.personKey === key) return;
-  if (S.personStatus === "loading" && modnetPending && modnetPending.key === key) return;
-  if (!S.base) buildBase();
-  var snapshot = S.base;
-  modnetPending = { key: key };
-  setPersonStatus("loading", "MODNetで人物マットを推定中です…（初回は実行環境とモデルの読み込みで少し時間がかかります。全体の判定のあと、人物の範囲を切り取って指先などの細部を再推定するので、少し長めにかかります）");
-  requestRender();
-  getModnetSession().then(function(sess){
+function maskCoverage(canvas){
+  var ctx = canvas.getContext("2d");
+  var sample = ctx.getImageData(0, 0, canvas.width, canvas.height).data, sum = 0, cnt = 0, i;
+  for (i = 0; i < sample.length; i += 4 * 97) { sum += sample[i]; cnt++; }
+  return cnt ? (sum / cnt) / 255 : 0;
+}
+/* Run MODNet's two-pass inference on a snapshot of the fitted frame and
+   resolve with the cleaned matte canvas (null when isStale() reports the
+   request was superseded mid-flight). Shared by the "modnet" mode and by
+   the hybrid mode, which needs the matte as an edge source rather than
+   as the mask itself. */
+function runModnetMatte(snapshot, isStale){
+  return getModnetSession().then(function(sess){
     // Pass 1: whole frame at the model's native scale (shortest edge 512).
     // On its own this starves fine structures: when the person occupies
     // only part of the frame, a finger may be just a few input pixels
     // wide and adjacent fingers merge into one blob in the matte.
     return modnetInfer(sess, snapshot, 512).then(function(coarse){
-      if (!modnetPending || modnetPending.key !== key) return null;
+      if (isStale()) return null;
       // Person bounding box from the coarse matte, as frame fractions.
       var minX = coarse.rw, minY = coarse.rh, maxX = -1, maxY = -1, x, y;
       for (y = 0; y < coarse.rh; y += 2) for (x = 0; x < coarse.rw; x += 2){
@@ -1402,11 +1503,11 @@ function ensureModnetMask(){
           if (y > maxY) maxY = y;
         }
       }
-      if (maxX < 0) return { matteCanvas: modnetMatteCanvas(coarse) }; // no person: the coverage check below reports it
+      if (maxX < 0) return modnetMatteCanvas(coarse); // no person: the caller's coverage check reports it
       var fx0 = Math.max(0, minX / coarse.rw - 0.07), fy0 = Math.max(0, minY / coarse.rh - 0.07);
       var fx1 = Math.min(1, maxX / coarse.rw + 0.07), fy1 = Math.min(1, maxY / coarse.rh + 0.07);
       if ((fx1 - fx0) > 0.93 && (fy1 - fy0) > 0.93){
-        return { matteCanvas: modnetMatteCanvas(coarse) }; // person fills the frame; a crop would gain nothing
+        return modnetMatteCanvas(coarse); // person fills the frame; a crop would gain nothing
       }
       // Pass 2 (detail): re-render the fitted frame from the ORIGINAL at
       // high resolution, crop just the person region, and run the model
@@ -1436,19 +1537,29 @@ function ensureModnetMask(){
         fctx.imageSmoothingEnabled = true; fctx.imageSmoothingQuality = "high";
         fctx.drawImage(modnetMatteCanvas(coarse), 0, 0, hrW, hrH);
         fctx.drawImage(modnetMatteCanvas(fine), cx0, cy0, cw, ch);
-        return { matteCanvas: full };
+        return full;
       });
     });
-  }).then(function(res){
-    if (!res) return; // superseded by a newer request
+  }).then(function(canvas){
+    if (canvas) cleanPersonMask(canvas);
+    return canvas;
+  });
+}
+function ensureModnetMask(){
+  var key = personKey();
+  if (!key) return;
+  if (S.personMask && S.personKey === key) return;
+  if (S.personStatus === "loading" && modnetPending && modnetPending.key === key) return;
+  if (!S.base) buildBase();
+  var snapshot = S.base;
+  modnetPending = { key: key };
+  setPersonStatus("loading", "MODNetで人物マットを推定中です…（初回は実行環境とモデルの読み込みで少し時間がかかります。全体の判定のあと、人物の範囲を切り取って指先などの細部を再推定するので、少し長めにかかります）");
+  requestRender();
+  runModnetMatte(snapshot, function(){ return !modnetPending || modnetPending.key !== key; }).then(function(full){
+    if (!full) return; // superseded by a newer request
     if (!modnetPending || modnetPending.key !== key) { modnetPending = null; return; }
     modnetPending = null;
-    var full = res.matteCanvas;
-    cleanPersonMask(full);
-    var fctx = full.getContext("2d");
-    var sample = fctx.getImageData(0, 0, full.width, full.height).data, sum = 0, cnt = 0, i;
-    for (i = 0; i < sample.length; i += 4 * 97) { sum += sample[i]; cnt++; }
-    var cover = cnt ? (sum / cnt) / 255 : 0;
+    var cover = maskCoverage(full);
     if (cover < 0.005 || cover > 0.995){
       S.personMask = null; S.personKey = null;
       setPersonStatus("none", "MODNetで人物が検出できませんでした。人物が大きく写った写真で試すか、「人物で抜く」または「色で抜く」に切り替えてください。");
@@ -1466,36 +1577,115 @@ function ensureModnetMask(){
     requestRender();
   });
 }
+/* ================= hybrid mode (MediaPipe region + MODNet edge) =================
+   The two person models fail in opposite places on the reference photo
+   (blue kimono, hanging sleeve): MediaPipe's region is right — the
+   sleeve's shape and extent are correct — but its edge is soft and
+   dithers into dots; MODNet's edge is sharp but it misreads the
+   sleeve's interior as background and the sleeve's shape collapses.
+   So the hybrid runs BOTH and stores them apart: the MediaPipe mask
+   becomes S.personMask (the region authority the whole pipeline already
+   consumes), the MODNet matte becomes S.edgeMask, and the refinement
+   (getRefinedPersonCanvas) redraws the edge from MODNet ONLY inside
+   MediaPipe's boundary band and ONLY where MODNet's own matte is steep
+   there — a flat MODNet matte across the band, which is exactly what a
+   misjudged sleeve interior looks like, contributes nothing. If one
+   model fails outright, the other still cuts alone, with a status note
+   saying so. */
+var hybridPending = null;
+function ensureHybridMask(){
+  var key = personKey();
+  if (!key) return;
+  if (S.personMask && S.personKey === key) return;
+  if (S.personStatus === "loading" && hybridPending && hybridPending.key === key) return;
+  if (S.hybridFailKey === key && (S.personStatus === "error" || S.personStatus === "none")) return;
+  if (!S.base) buildBase();
+  hybridPending = { key: key };
+  setPersonStatus("loading", "併用で判定中です…（人物判定で領域を確定し、MODNetで縁を引き直します。初回は両方のモデルの読み込みで少し時間がかかります。全体の判定のあと、人物の範囲を切り取って指先などの細部を再推定するので、少し長めにかかります）");
+  requestRender();
+  var jobs = [];
+  if (S.mpMask && S.mpKey === key){
+    jobs.push(Promise.resolve(true));
+  } else {
+    jobs.push(runMediaPipeMask(key).then(function(res){
+      if (res.cover < 0.005 || res.cover > 0.995) return false;
+      S.mpMask = res.canvas; S.mpKey = key;
+      return true;
+    }).catch(function(){ return false; }));
+  }
+  if (S.mnMask && S.mnKey === key){
+    jobs.push(Promise.resolve(true));
+  } else {
+    jobs.push(runModnetMatte(S.base, function(){ return !hybridPending || hybridPending.key !== key; }).then(function(full){
+      if (!full) return false;
+      var cover = maskCoverage(full);
+      if (cover < 0.005 || cover > 0.995) return false;
+      S.mnMask = full; S.mnKey = key;
+      return true;
+    }).catch(function(){ return false; }));
+  }
+  Promise.all(jobs).then(function(ok){
+    if (!hybridPending || hybridPending.key !== key) return;
+    hybridPending = null;
+    if (personKey() !== key){ requestRender(); return; } // mode/geometry moved on; a fresh ensure will run
+    var mpOk = ok[0] && S.mpMask && S.mpKey === key;
+    var mnOk = ok[1] && S.mnMask && S.mnKey === key;
+    if (mpOk){
+      S.personMask = S.mpMask;
+      S.edgeMask = mnOk ? S.mnMask : null;
+      S.personKey = key;
+      S.personSerial = (S.personSerial || 0) + 1;
+      S.edgeSerial = (S.edgeSerial || 0) + 1;
+      S.refinedPerson = null;
+      S.hybridFailKey = null;
+      if (mnOk){
+        setPersonStatus("ready", "併用で切り抜きました（画像の約" + Math.round(maskCoverage(S.mpMask) * 100) + "%）。領域は人物判定、縁は境界の帯の中だけMODNetと写真の縁で引き直しています。輪郭が食い込む／残る場合は「許容差」と「境界ぼかし」で、輪郭の外側に背景の縁が残る場合は「輪郭の収縮」で調整してください。");
+      } else {
+        setPersonStatus("ready", "MODNetの読み込み／実行に失敗したため、人物判定だけで切り抜きました（領域はそのまま、縁は「人物で抜く」と同じ柔らかさになります）。通信環境を確認して「併用で切り抜きを実行」を押すと、MODNetの縁で引き直せます。");
+      }
+    } else if (mnOk){
+      S.personMask = S.mnMask;
+      S.edgeMask = null;
+      S.personKey = key;
+      S.personSerial = (S.personSerial || 0) + 1;
+      S.edgeSerial = (S.edgeSerial || 0) + 1;
+      S.refinedPerson = null;
+      S.hybridFailKey = null;
+      setPersonStatus("ready", "人物判定に失敗したため、MODNetだけで切り抜きました（縁はシャープですが、袖のような大きな面の領域が崩れることがあります）。その場合は「人物で抜く」をお試しください。");
+    } else {
+      S.personMask = null; S.personKey = null; S.edgeMask = null;
+      S.hybridFailKey = key;
+      setPersonStatus("error", "人物判定とMODNetの両方に失敗しました。通信環境を確認して「併用で切り抜きを実行」を押すか、他の抜き方をお試しください。");
+    }
+    requestRender();
+  });
+}
 function ensurePersonMask(){
   if (!S.src || !$("bgOn").checked) return;
   var mode0 = $("bgMode").value;
-  if (mode0 !== "person" && mode0 !== "modnet") return;
+  if (mode0 !== "person" && mode0 !== "modnet" && mode0 !== "hybrid") return;
   if (mode0 === "modnet"){ ensureModnetMask(); return; }
+  if (mode0 === "hybrid"){ ensureHybridMask(); return; }
   var key = personKey();
   if (!key) return;
   if (S.personMask && S.personKey === key) return;
   if (S.personStatus === "loading" && segPending && segPending.key === key) return;
-  if (!S.base) buildBase();
-  // Feed the model an UPSCALED copy of the frame: with small sources
-  // (a few hundred px) the returned mask is otherwise only as fine as
-  // the tiny input, and every edge defect is magnified ~8x on export.
-  // The model returns its mask at the input size, so a larger input
-  // yields a smoother, higher-resolution mask to refine from.
-  var segScale = clamp(1100 / Math.max(S.base.width, S.base.height), 1, 3);
-  var snapshot = document.createElement("canvas");
-  snapshot.width = Math.max(2, Math.round(S.base.width * segScale));
-  snapshot.height = Math.max(2, Math.round(S.base.height * segScale));
-  var snapCtx = snapshot.getContext("2d");
-  snapCtx.imageSmoothingEnabled = true; snapCtx.imageSmoothingQuality = "high";
-  snapCtx.drawImage(S.base, 0, 0, snapshot.width, snapshot.height);
   setPersonStatus("loading", "人物を判定中です…（初回はモデルの読み込みで少し時間がかかります）");
   requestRender();
-  loadSegScript().then(function(){
-    var seg = getSegInstance();
-    segPending = { key: key, canvas: snapshot };
-    return seg.send({ image: snapshot });
+  runMediaPipeMask(key).then(function(res){
+    if (personKey() !== key) return; // superseded by a newer frame/mode
+    if (res.cover < 0.005 || res.cover > 0.995){
+      S.personMask = null; S.personKey = null;
+      setPersonStatus("none", "人物が検出できませんでした。人物が大きく写った写真で試すか、「色で抜く」に切り替えてください。");
+      requestRender(); return;
+    }
+    S.personMask = res.canvas; S.personKey = key;
+    S.personSerial = (S.personSerial || 0) + 1; S.refinedPerson = null;
+    setPersonStatus("ready", "人物を検出しました（画像の約" + Math.round(res.cover * 100) + "%）。輪郭が食い込む／残る場合は「許容差」と「境界ぼかし」で、輪郭の外側に背景の縁が残る場合は「輪郭の収縮」で調整してください。");
+    requestRender();
   }).catch(function(){
-    segPending = null;
+    if (personKey() !== key) return;
+    S.personMask = null; S.personKey = null;
     setPersonStatus("error", "人物判定モデルを読み込めませんでした。通信環境を確認して「人物の切り抜きを実行」を押すか、「色で抜く」をお試しください。");
     requestRender();
   });
@@ -1510,6 +1700,12 @@ $("bgModnetBtn").addEventListener("click", function(){
   if (!$("bgOn").checked){ $("bgOn").checked = true; $("bgOn").dispatchEvent(new Event("change")); return; }
   ensurePersonMask();
 });
+$("bgHybridBtn").addEventListener("click", function(){
+  S.personMask = null; S.personKey = null; S.personStatus = "idle";
+  S.mpKey = null; S.mnKey = null; S.hybridFailKey = null; hybridPending = null;
+  if (!$("bgOn").checked){ $("bgOn").checked = true; $("bgOn").dispatchEvent(new Event("change")); return; }
+  ensurePersonMask();
+});
 
 /* ============================== background removal ============================== */
 $("bgOn").addEventListener("change", function(){
@@ -1521,7 +1717,8 @@ $("bgMode").addEventListener("change", function(){
   $("bgColorRow").style.display = this.value === "color" ? "block" : "none";
   $("bgPersonRow").style.display = this.value === "person" ? "block" : "none";
   $("bgModnetRow").style.display = this.value === "modnet" ? "block" : "none";
-  if (this.value === "person" || this.value === "modnet") ensurePersonMask();
+  $("bgHybridRow").style.display = this.value === "hybrid" ? "block" : "none";
+  if (this.value === "person" || this.value === "modnet" || this.value === "hybrid") ensurePersonMask();
   requestRender();
 });
 $("bgOut").addEventListener("change", requestRender);
@@ -1727,7 +1924,7 @@ function doExport(full){
   // it would be stretched over this frame and cut the subject at the wrong
   // place. Ask for a retry once the preview has re-segmented instead of
   // silently writing a misaligned file.
-  if ($("bgOn").checked && ($("bgMode").value === "person" || $("bgMode").value === "modnet") && (!S.personMask || S.personKey !== personKey())){
+  if ($("bgOn").checked && ($("bgMode").value === "person" || $("bgMode").value === "modnet" || $("bgMode").value === "hybrid") && (!S.personMask || S.personKey !== personKey())){
     $("exportInfo").textContent = "人物の切り抜きを現在のサイズで再計算中です。プレビューの人物表示が更新されてから、もう一度書き出してください。";
     ensurePersonMask();
     return;
