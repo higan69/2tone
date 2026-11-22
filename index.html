@@ -324,7 +324,7 @@
           <div class="row" style="margin-top:8px">
             <button class="btn small" id="bgPersonBtn" type="button">人物の切り抜きを実行</button>
           </div>
-          <p class="hint">「許容差」で人物として残す強さ、「境界ぼかし」で輪郭のなじませ具合を調整できます。輪郭の外側に背景の明るい縁が残るときは「輪郭の収縮」を上げてください。ぼかし／収縮はどちらも<b>入稿サイズ基準のpx</b>で、書き出し時に拡大された後の解像度で効くので、実寸でも縁が甘くなりません。うまく抜けない場合は下の「色で抜く」も試せます。</p>
+          <p class="hint">「許容差」で人物として残す強さ、「境界ぼかし」で輪郭のなじませ具合を調整できます。輪郭の外側に背景の明るい縁が残るときは「輪郭の収縮」を上げてください。ぼかし／収縮はどちらも<b>入稿サイズ基準のpx</b>で、書き出し時に拡大された後の解像度で効くので、実寸でも縁が甘くなりません。輪郭整形の最後では、境界の帯の中の各画素を、最も近い確実な人物／背景の写真の色と比べて判定し直すので、袖のような大きな平坦面でも縁は写真の輪郭どおり数pxまで締まります。うまく抜けない場合は下の「色で抜く」も試せます。</p>
         </div>
         <div id="bgModnetRow" style="display:none">
           <p class="hint" id="bgModnetStatus" style="margin-top:8px">人物専用のマッティングモデル MODNet（Apache-2.0／商用利用可）で、髪の毛先まで含めた人物のマット（抜きマスク）を推定します。背景削除をONにするか下のボタンを押すと実行します。初回だけ実行環境とモデル（合計 約17MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。推定は2段階で、全体を判定したあと人物の範囲だけを切り取って拡大し、指先などの細部を再推定します。</p>
@@ -334,11 +334,11 @@
           <p class="hint">得られたマットには、上の「人物で抜く」と同じ輪郭整形（飛び地除去・エッジ吸着）と、「許容差」「境界ぼかし」「輪郭の収縮」がそのまま効きます。輪郭整形ではさらに、写真側にはっきりした縁がある場所（袖のような大きな平坦面の輪郭）ではマットの縁を写真の輪郭に合わせて締め直し、写真が平坦な場所（袖と体の隙間など）に残ったマットの斑は周囲の多数決で消すので、ディザで縁が点々に化けたり隙間にノイズが残ったりしにくくなっています。さらに最終の切り口では、グレーを白へなじませる帯を境界ぼかしの約1/3に圧縮しているので、ぼかしを入れても輪郭に沿った点々の帯が残りにくく、縁は硬く出ます（切り口の位置と透過の柔らかさは従来どおりです）。読み込みや実行に失敗した場合は、「人物で抜く（人物を自動判定）」に切り替えてください。</p>
         </div>
         <div id="bgHybridRow" style="display:none">
-          <p class="hint" id="bgHybridStatus" style="margin-top:8px">「人物で抜く」と「MODNetで抜く」の併用です。領域（どこまでが人物か）は人物判定のマスクで確定し、その境界の帯の中だけで、縁の位置とシャープさをMODNetのマットと写真の縁で引き直します。袖のように大きな面の形は人物判定どおりに保たれ、縁はMODNet並みに硬く出ます。背景削除をONにするか下のボタンを押すと実行します。初回は両方のモデル（合計 約24MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。</p>
+          <p class="hint" id="bgHybridStatus" style="margin-top:8px">「人物で抜く」と「MODNetで抜く」の併用です。領域（どこまでが人物か）は人物判定のマスクで確定し、その境界の帯の中だけで、縁の位置とシャープさをMODNetのマットと写真の縁で引き直し、最後に帯全体を写真の色の縁へ寄せ直します。袖のように大きな面の形は人物判定どおりに保たれ、縁は写真の輪郭どおり硬く出ます。背景削除をONにするか下のボタンを押すと実行します。初回は両方のモデル（合計 約24MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。</p>
           <div class="row" style="margin-top:8px">
             <button class="btn small" id="bgHybridBtn" type="button">併用で切り抜きを実行</button>
           </div>
-          <p class="hint">得られたマットには、他の抜き方と同じ輪郭整形（飛び地除去・エッジ吸着）と、「許容差」「境界ぼかし」「輪郭の収縮」がそのまま効きます。MODNetが袖の内側のように領域の内側で大きく食い違う場所は境界の帯の外なのでMODNetは効かず、人物判定の領域がそのまま残ります。帯の中でも、MODNetのマットが平らな場所（MODNet自身が縁を見つけていない場所）では引き直しは働きません。どちらか一方の読み込みや実行に失敗した場合は、成功した方だけで切り抜きます。</p>
+          <p class="hint">得られたマットには、他の抜き方と同じ輪郭整形（飛び地除去・エッジ吸着）と、「許容差」「境界ぼかし」「輪郭の収縮」がそのまま効きます。MODNetが袖の内側のように領域の内側で大きく食い違う場所は境界の帯の外なのでMODNetは効かず、人物判定の領域がそのまま残ります。帯の中でも、MODNetのマットが平らな場所（MODNet自身が縁を見つけていない場所）ではMODNetによる引き直しは働きませんが、最後に帯全体を写真の色の縁へ寄せ直す処理がMODNetに依存せず効くので、袖のような場所でも縁は写真の輪郭どおり数pxまで締まります。どちらか一方の読み込みや実行に失敗した場合は、成功した方だけで切り抜きます。</p>
         </div>
         <div id="bgColorRow" style="display:none">
           <label class="f">背景色 <span class="swatch" id="bgSwatch"></span> <span class="mono" id="bgHex">#FFFFFF</span></label>
@@ -524,7 +524,7 @@ function setSource(canvas, name){
   S.mpMask = null; S.mpKey = null; S.mnMask = null; S.mnKey = null;
   S.edgeMask = null; S.hybridFailKey = null;
   var hs = $("bgHybridStatus");
-  if (hs) hs.textContent = "「人物で抜く」と「MODNetで抜く」の併用です。領域（どこまでが人物か）は人物判定のマスクで確定し、その境界の帯の中だけで、縁の位置とシャープさをMODNetのマットと写真の縁で引き直します。袖のように大きな面の形は人物判定どおりに保たれ、縁はMODNet並みに硬く出ます。背景削除をONにするか下のボタンを押すと実行します。初回は両方のモデル（合計 約24MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。";
+  if (hs) hs.textContent = "「人物で抜く」と「MODNetで抜く」の併用です。領域（どこまでが人物か）は人物判定のマスクで確定し、その境界の帯の中だけで、縁の位置とシャープさをMODNetのマットと写真の縁で引き直し、最後に帯全体を写真の色の縁へ寄せ直します。袖のように大きな面の形は人物判定どおりに保たれ、縁は写真の輪郭どおり硬く出ます。背景削除をONにするか下のボタンを押すと実行します。初回は両方のモデル（合計 約24MB）を読み込むので少し時間がかかりますが、推論はこのブラウザ内で行い、画像が外部に送られることはありません。";
   var ps = $("bgPersonStatus");
   if (ps) ps.textContent = "人物の切り抜きが標準です。背景削除をONにすると、画像から人物だけを自動で判定します。初回だけ判定用モデルの読み込みに少し時間がかかります。";
   var ms = $("bgModnetStatus");
@@ -659,6 +659,25 @@ function buildLUT(){
       but only where MODNet's own matte is steep there, so its area
       mistakes (a sleeve interior read as background) cannot move the
       MediaPipe region; see the hybrid pass inside.
+   2b. guidedEdgeSnap (person / hybrid modes, final pass): the passes
+      above still leave the upscaled MediaPipe ramp several px wide at
+      exactly the places that matter — a big flat contour like a
+      hanging sleeve, where MODNet's matte is flat or wrong (so the
+      hybrid redraw never engages) and the colour fields of the simple
+      matting are too blurred (or, in browsers without canvas filter
+      support, not blurred at all) to re-derive a hard edge. So, as the
+      last step, every band pixel is re-judged against the photo's OWN
+      colours at full resolution: the reference foreground / background
+      colours are the photo colours of the NEAREST definite-region
+      pixels (BFS over the band), and the pixel's alpha is replaced by
+      a steepened projection of its colour onto that local fg–bg line.
+      A pixel whose colour is the sleeve's blue becomes foreground and
+      one whose colour is the wall becomes background, however wide
+      the model's ramp was — the transition collapses to the photo's
+      own edge width (a few px). Where the two reference colours are
+      too close (no usable colour edge in the photo), the pixel is
+      left untouched. Pixels outside the band are never touched, so
+      the region stays MediaPipe's and thin detail keeps its profile.
    3. In computeGray, the final threshold is applied at the target size
       with feather/shrink expressed in output pixels and converted
       through the mask's local gradient, so the edge width in print
@@ -738,6 +757,94 @@ function buildColorField(imgC, alpha, w, h, wantFg, rad){
   octx.drawImage(src, 0, 0);
   try { octx.filter = "none"; } catch(e) {}
   return octx.getImageData(0, 0, w, h).data;
+}
+/* Separable box blur over an interleaved Float32Array (ch channels),
+   sliding-window, edges clamped. Used instead of ctx.filter so the
+   result does not depend on canvas-filter support (absent in some
+   browsers, which silently turned the older colour fields into
+   unblurred cut-outs and disabled the matting built on them). */
+function boxBlurInterleaved(f, w, h, ch, rad){
+  var src = Float32Array.from(f), cnt = rad * 2 + 1, x, y, c, k;
+  for (y = 0; y < h; y++){
+    var row = y * w, acc = new Float64Array(ch);
+    for (k = -rad; k <= rad; k++){ var cx0 = k < 0 ? 0 : (k >= w ? w - 1 : k); for (c = 0; c < ch; c++) acc[c] += src[(row + cx0) * ch + c]; }
+    for (x = 0; x < w; x++){
+      for (c = 0; c < ch; c++) f[(row + x) * ch + c] = acc[c] / cnt;
+      var xa = x - rad < 0 ? 0 : x - rad, xb = x + rad + 1 >= w ? w - 1 : x + rad + 1;
+      for (c = 0; c < ch; c++) acc[c] += src[(row + xb) * ch + c] - src[(row + xa) * ch + c];
+    }
+  }
+  src.set(f);
+  for (x = 0; x < w; x++){
+    var acc2 = new Float64Array(ch);
+    for (k = -rad; k <= rad; k++){ var cy0 = k < 0 ? 0 : (k >= h ? h - 1 : k); for (c = 0; c < ch; c++) acc2[c] += src[(cy0 * w + x) * ch + c]; }
+    for (y = 0; y < h; y++){
+      for (c = 0; c < ch; c++) f[(y * w + x) * ch + c] = acc2[c] / cnt;
+      var ya = y - rad < 0 ? 0 : y - rad, yb = y + rad + 1 >= h ? h - 1 : y + rad + 1;
+      for (c = 0; c < ch; c++) acc2[c] += src[(yb * w + x) * ch + c] - src[(ya * w + x) * ch + c];
+    }
+  }
+}
+/* Guided edge snap: re-derive the boundary band's alpha from the
+   photo's own colours at full resolution. For every band pixel, the
+   reference foreground / background colours are sampled from the
+   NEAREST definite-region pixels (multi-source BFS across the band,
+   colours read from a lightly blurred copy of the photo so sensor
+   noise does not leak in), and alpha is replaced by a steepened
+   projection of the pixel's colour onto that local fg–bg line.
+   Independent of any model matte's sharpness, so it tightens the
+   soft upscaled MediaPipe ramp even where MODNet found no edge
+   (the hanging-sleeve case). Guarded by colour separation: where
+   fg and bg reference colours are too close, the photo has no
+   usable edge and the pixel keeps its current alpha. Only band
+   pixels (0.02..0.98) are touched; the region is unchanged.
+   Returns the number of pixels changed. Self-contained (arrays
+   only) so it can be exercised outside the page. */
+function guidedEdgeSnap(alpha, imgD, w, h){
+  var N = w * h, i;
+  function c01(v){ return v < 0 ? 0 : (v > 1 ? 1 : v); }
+  var photo = new Float32Array(N * 3);
+  for (i = 0; i < N; i++){ photo[i*3] = imgD[i*4]; photo[i*3+1] = imgD[i*4+1]; photo[i*3+2] = imgD[i*4+2]; }
+  boxBlurInterleaved(photo, w, h, 3, 2);
+  boxBlurInterleaved(photo, w, h, 3, 2);
+  function nearestSources(isSeed, canPass){
+    var srcOf = new Int32Array(N).fill(-1);
+    var queue = new Int32Array(N), head = 0, tail = 0, j;
+    for (j = 0; j < N; j++) if (isSeed(alpha[j])){ srcOf[j] = j; queue[tail++] = j; }
+    if (!tail) return null;
+    while (head < tail){
+      var cur = queue[head++], cx = cur % w, sv = srcOf[cur];
+      if (cx > 0 && srcOf[cur-1] < 0 && canPass(alpha[cur-1])){ srcOf[cur-1] = sv; queue[tail++] = cur - 1; }
+      if (cx < w - 1 && srcOf[cur+1] < 0 && canPass(alpha[cur+1])){ srcOf[cur+1] = sv; queue[tail++] = cur + 1; }
+      if (cur - w >= 0 && srcOf[cur-w] < 0 && canPass(alpha[cur-w])){ srcOf[cur-w] = sv; queue[tail++] = cur - w; }
+      if (cur + w < N && srcOf[cur+w] < 0 && canPass(alpha[cur+w])){ srcOf[cur+w] = sv; queue[tail++] = cur + w; }
+    }
+    return srcOf;
+  }
+  var fgSrc = nearestSources(function(a){ return a >= 0.9; }, function(a){ return a > 0.1; });
+  var bgSrc = nearestSources(function(a){ return a <= 0.1; }, function(a){ return a < 0.9; });
+  if (!fgSrc || !bgSrc) return 0;
+  var changed = 0;
+  for (i = 0; i < N; i++){
+    var a0 = alpha[i];
+    if (a0 <= 0.02 || a0 >= 0.98) continue;
+    var fs = fgSrc[i], bs = bgSrc[i];
+    if (fs < 0 || bs < 0) continue;
+    var fR = photo[fs*3], fG = photo[fs*3+1], fB = photo[fs*3+2];
+    var bR = photo[bs*3], bG = photo[bs*3+1], bB = photo[bs*3+2];
+    var sR = fR - bR, sG = fG - bG, sB = fB - bB;
+    var sep = Math.sqrt(sR*sR + sG*sG + sB*sB) / 441.7;
+    if (sep < 0.055) continue; // no usable colour edge in the photo here
+    var o = i * 4, pR = imgD[o], pG = imgD[o+1], pB = imgD[o+2];
+    var dF = (pR-fR)*(pR-fR) + (pG-fG)*(pG-fG) + (pB-fB)*(pB-fB);
+    var dB = (pR-bR)*(pR-bR) + (pG-bG)*(pG-bG) + (pB-bB)*(pB-bB);
+    var ratio = dB / (dF + dB + 0.01);
+    var snapped = c01(0.5 + (ratio - 0.5) * 2.8);
+    var conf = c01((sep - 0.055) / 0.10);
+    var na = a0 + (snapped - a0) * (0.55 + 0.45 * conf);
+    if (na !== a0){ alpha[i] = na; changed++; }
+  }
+  return changed;
 }
 function getRefinedPersonCanvas(w, h, imgCanvas){
   if (!S.personMask) return null;
@@ -900,6 +1007,22 @@ function getRefinedPersonCanvas(w, h, imgCanvas){
       if (w3 <= 0) continue;
       var hard3 = clamp01(0.5 + (preA[i] - 0.5) * 1.75);
       alpha[i] = preA[i] + (hard3 - preA[i]) * w3 * 0.9;
+    }
+    // ---- pass 4: guided snap onto the photo's own colour edge ----
+    // Person / hybrid only, and deliberately independent of MODNet:
+    // at a hanging sleeve MODNet's matte is flat or wrong, so the
+    // hybrid redraw above never engages there, and the upscaled
+    // MediaPipe ramp (passes 1–3 can steepen it but not re-centre it
+    // onto the photographed contour) is what stays soft. This pass
+    // re-judges every band pixel against the photo colours sampled
+    // from the nearest definite foreground / background, collapsing
+    // the transition to the photo edge's own width. In hybrid mode
+    // it runs after the MODNet redraw, so it can only tighten within
+    // the band the redraw already respected; the region (MediaPipe)
+    // and pixels outside the band are untouched.
+    var modeNow = $("bgMode") ? $("bgMode").value : "person";
+    if (modeNow === "person" || modeNow === "hybrid"){
+      try { guidedEdgeSnap(alpha, imgD, rw, rh); } catch(e4) { /* snap is best-effort */ }
     }
   } catch(e) { /* matting is best-effort; steepened mask still applies */ }
   for (i = 0; i < alpha.length; i++){ var v = Math.round(alpha[i] * 255); dd[i*4] = dd[i*4+1] = dd[i*4+2] = v; dd[i*4+3] = 255; }
@@ -1678,7 +1801,7 @@ function ensureHybridMask(){
       S.refinedPerson = null;
       S.hybridFailKey = null;
       if (mnOk){
-        setPersonStatus("ready", "併用で切り抜きました（画像の約" + Math.round(maskCoverage(S.mpMask) * 100) + "%）。領域は人物判定、縁は境界の帯の中だけMODNetと写真の縁で引き直しています。輪郭が食い込む／残る場合は「許容差」と「境界ぼかし」で、輪郭の外側に背景の縁が残る場合は「輪郭の収縮」で調整してください。");
+        setPersonStatus("ready", "併用で切り抜きました（画像の約" + Math.round(maskCoverage(S.mpMask) * 100) + "%）。領域は人物判定、縁は境界の帯の中だけでMODNetと写真の色の縁に引き直しています。輪郭が食い込む／残る場合は「許容差」と「境界ぼかし」で、輪郭の外側に背景の縁が残る場合は「輪郭の収縮」で調整してください。");
       } else {
         setPersonStatus("ready", "MODNetの読み込み／実行に失敗したため、人物判定だけで切り抜きました（領域はそのまま、縁は「人物で抜く」と同じ柔らかさになります）。通信環境を確認して「併用で切り抜きを実行」を押すと、MODNetの縁で引き直せます。");
       }
